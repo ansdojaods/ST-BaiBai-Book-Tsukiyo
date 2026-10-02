@@ -10,8 +10,9 @@
  *        仅当用户显式调用 exportChannel() 才把凭据交给手机(用于"把柏宝书渠道导入手机方案")。
  *  - 事件:window 上派发 'st-baibai-book:phone-update',detail.type ∈ external|anchor|memory。
  */
-import { apiSettings, type ApiChannel } from '@/api/settings';
-import { requestCompletion, testChannel as testChannelRaw, type ChatMsg } from '@/api/client';
+import { watch } from 'vue';
+import { apiSettings, type ApiChannel, type ChannelLastTest } from '@/api/settings';
+import { requestCompletion, testChannel as testChannelRaw, type ChatMsg, type ChannelTestOptions, type ChannelTestResult } from '@/api/client';
 import { getContext } from '@/st/context';
 import { getSnapshot, getHistory } from '@/public/query';
 import { PLUGIN_VERSION } from '@/version';
@@ -28,6 +29,7 @@ export const PHONE_API_VERSION = 1;
 export interface PhoneNpcBrief {
   name: string;
   relation: string;
+  ties?: string;
   title: string;
   condition: string;
   location: string;
@@ -66,6 +68,8 @@ export interface PhoneBrief {
   protagonist: Record<string, string>;
   items: Array<{ name: string; qty: number | null; location: string }>;
   npcs: PhoneNpcBrief[];
+  /** 核心/主要配角列表(按核心重要度、当前在场、好感度排序,供手机端「恋爱心迹」联动调用) */
+  mainNpcs: PhoneNpcBrief[];
   presentNpcs: string[];
   plans: PhonePlanBrief[];
   lifeDetails: Array<{ subject: string; text: string; tier: string }>;
@@ -81,7 +85,8 @@ export interface PhoneChannelInfo {
   model: string;
   host: string;
   hasKey: boolean;
-  lastTest: { at: number; ok: boolean; message: string } | null;
+  testPrompt: string;
+  lastTest: ChannelLastTest | null;
 }
 
 function host(url: string): string {
@@ -114,6 +119,7 @@ export function getBrief(options: { historyChars?: number; anchorChars?: number 
   const npcs: PhoneNpcBrief[] = snap.npcs.map(n => ({
     name: n.name,
     relation: n.relation ?? '',
+    ties: n.ties ?? '',
     title: n.title ?? '',
     condition: n.condition ?? '',
     location: n.location ?? '',
@@ -126,6 +132,14 @@ export function getBrief(options: { historyChars?: number; anchorChars?: number 
     personality: n.personality ?? '',
     desc: n.desc ?? '',
   }));
+  const mainNpcs: PhoneNpcBrief[] = [...npcs].sort((a, b) => {
+    const score = (x: PhoneNpcBrief) =>
+      (x.important ? 100 : 0) +
+      (x.present ? 40 : 0) +
+      (typeof x.affinityInner === 'number' ? (x.affinityInner + 3) * 5 : 0) +
+      (x.relation ? 5 : 0);
+    return score(b) - score(a);
+  });
   const plans: PhonePlanBrief[] = snap.plans
     .filter(p => p.status === 'open')
     .map(p => ({
@@ -152,6 +166,7 @@ export function getBrief(options: { historyChars?: number; anchorChars?: number 
     protagonist,
     items: snap.items.map(i => ({ name: i.name, qty: i.qty ?? null, location: i.location ?? '' })),
     npcs,
+    mainNpcs,
     presentNpcs: npcs.filter(n => n.present).map(n => n.name),
     plans,
     lifeDetails: snap.lifeDetails.filter(d => d.tier !== 'archive').map(d => ({ subject: d.subject ?? '', text: d.text, tier: d.tier })),
@@ -200,6 +215,7 @@ export function listChannels(): PhoneChannelInfo[] {
     model: c.model,
     host: host(c.url),
     hasKey: !!c.key,
+    testPrompt: c.testPrompt ?? '',
     lastTest: c.lastTest ?? null,
   }));
 }
@@ -219,18 +235,21 @@ export async function requestWithChannel(channelId: string, messages: ChatMsg[])
   return requestCompletion(c, msgs);
 }
 
-export async function testChannel(channelId: string, phrase?: string): Promise<{ ok: boolean; message: string }> {
+export async function testChannel(
+  channelId: string,
+  phraseOrOpts?: string | ChannelTestOptions,
+): Promise<ChannelTestResult> {
   const c = findChannel(channelId);
-  const r = await testChannelRaw(c, phrase);
+  const r = await testChannelRaw(c, phraseOrOpts);
   getContext()?.saveSettingsDebounced?.();
   return r;
 }
 
 /** 导出渠道凭据(用户在手机端显式点击"导入柏宝书渠道"时使用) */
-export function exportChannel(channelId: string): { id: string; name: string; url: string; key: string; model: string; temperature: number; maxTokens: number } {
+export function exportChannel(channelId: string): { id: string; name: string; url: string; key: string; model: string; temperature: number; maxTokens: number; testPrompt: string } {
   if (!apiSettings.phoneBridge.enabled) throw new Error('柏宝书的小手机联动已关闭');
   const c = findChannel(channelId);
-  return { id: c.id, name: c.name, url: c.url, key: c.key, model: c.model, temperature: c.temperature, maxTokens: c.maxTokens };
+  return { id: c.id, name: c.name, url: c.url, key: c.key, model: c.model, temperature: c.temperature, maxTokens: c.maxTokens, testPrompt: c.testPrompt ?? '' };
 }
 
 export function emitPhoneUpdate(type: 'external' | 'anchor' | 'memory', detail: Record<string, unknown> = {}): void {
@@ -245,14 +264,15 @@ export function emitPhoneUpdate(type: 'external' | 'anchor' | 'memory', detail: 
 export interface PhoneBridgeApi {
   readonly apiVersion: 1;
   getBrief(options?: { historyChars?: number; anchorChars?: number }): PhoneBrief;
+  getMainNpcs(): PhoneNpcBrief[];
   getNpcProfile(name: string): string;
   getAnchor(): { version: number; floor: number; text: string } | null;
   pushNotes(source: string, notes: ExternalNoteInput[], opts?: { replace?: boolean }): { added: number; updated: number; total: number };
   listNotes(source?: string): Array<{ id: string; source: string; kind: string; title?: string; text: string; time?: string; floor?: number; ts: number; pinned?: boolean }>;
   listChannels(): PhoneChannelInfo[];
   requestWithChannel(channelId: string, messages: ChatMsg[]): Promise<string>;
-  testChannel(channelId: string, phrase?: string): Promise<{ ok: boolean; message: string }>;
-  exportChannel(channelId: string): { id: string; name: string; url: string; key: string; model: string; temperature: number; maxTokens: number };
+  testChannel(channelId: string, phraseOrOpts?: string | ChannelTestOptions): Promise<ChannelTestResult>;
+  exportChannel(channelId: string): { id: string; name: string; url: string; key: string; model: string; temperature: number; maxTokens: number; testPrompt: string };
   isEnabled(): boolean;
   canReadMemory(): boolean;
 }
@@ -261,6 +281,14 @@ export function createPhoneApi(): PhoneBridgeApi {
   return Object.freeze({
     apiVersion: PHONE_API_VERSION,
     getBrief,
+    getMainNpcs: () => {
+      if (!apiSettings.phoneBridge.enabled || !apiSettings.phoneBridge.shareMemory) return [];
+      try {
+        return getBrief({ historyChars: 0, anchorChars: 0 }).mainNpcs;
+      } catch {
+        return [];
+      }
+    },
     getNpcProfile,
     getAnchor: () => {
       if (!apiSettings.phoneBridge.enabled || !apiSettings.phoneBridge.shareMemory) return null;
@@ -283,14 +311,13 @@ export function bindPhoneBridge(): void {
   if (bound) return;
   bound = true;
   onExternalChanged(info => emitPhoneUpdate('external', info));
-  // 锚点变化也通知手机(手机可据此刷新记忆导入)
-  let lastRev = anchorState.rev;
-  setInterval(() => {
-    if (anchorState.rev !== lastRev) {
-      lastRev = anchorState.rev;
+  // 锚点变化采用响应式 watch 通知手机,替代原来的 3 秒 setInterval 轮询
+  watch(
+    () => anchorState.rev,
+    () => {
       emitPhoneUpdate('anchor', { versions: anchorState.anchors.length });
-    }
-  }, 3000);
+    },
+  );
 }
 
 /* ======================= 从小手机导入 API 方案 ======================= */
@@ -349,5 +376,6 @@ export function importPhoneProfile(profileId: string, makeChannel: () => ApiChan
   if (key) channel.key = key;
   if (typeof p.temperature === 'number' && Number.isFinite(p.temperature)) channel.temperature = p.temperature;
   if (typeof p.maxTokens === 'number' && Number.isFinite(p.maxTokens) && p.maxTokens > 0) channel.maxTokens = Math.min(262144, Math.max(1, Math.floor(p.maxTokens)));
+  if (typeof p.testPrompt === 'string' && p.testPrompt.trim()) channel.testPrompt = p.testPrompt.trim();
   return { channel, created };
 }

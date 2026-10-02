@@ -1080,7 +1080,7 @@ provide(SUMMARY_CTX, {
         </button>
         <span v-else class="bbs-batch-progress">
           <span class="bbs-pending-spin"></span>
-          补摘中 {{ batchState.done }}/{{ batchState.total }}
+          补摘中 {{ batchState.done }}/{{ batchState.total }}<template v-if="batchState.currentRange"> ({{ batchState.currentRange }})</template>
           <button class="bbs-batch-cancel" type="button" :disabled="batchState.cancelRequested" @click="cancelBatchBackfill">
             {{ batchState.cancelRequested ? '停止中…' : '取消' }}
           </button>

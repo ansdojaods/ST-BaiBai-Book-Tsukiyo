@@ -2,7 +2,7 @@
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict'), path = require('node:path');
 let code = fs.readFileSync(path.join(__dirname, '..', 'tsukiyo-phone-1.6.3.js'), 'utf8');
 code = code.slice(0, code.lastIndexOf('TsukiyoPhoneBundle.start(')).replace('return __toCommonJS(index_exports);',
-  'return {PhoneActions, baibaiRuntime, baibaiReadEnabled, baibaiMemoryCandidates, baibaiFilterInput, actorContext, BaiBaiLink};');
+  'return {PhoneActions, baibaiRuntime, baibaiReadEnabled, baibaiMemoryCandidates, baibaiFilterInput, actorContext, BaiBaiLink, syncBaibaiMainNpcsToContacts, tpModuleMeta, tpDeleteBar, freshPhone, validatePhone};');
 const window = {};
 const B = vm.runInNewContext(code + '\nTsukiyoPhoneBundle;', { window, console, URL, TextEncoder, AbortController, setTimeout, clearTimeout });
 let allowed = true, reads = 0, history = 'BOOK_HISTORY_SENTINEL：两人约好明天讨论，还未执行。';
@@ -120,6 +120,91 @@ async function requestFor(method, args, on) {
     const f = syncFixture(); f.data.agenda.push({ id: 'a1', title: '约定', status: 'confirmed', members: ['user'] });
     await f.link.push(); f.data.agenda = []; await f.link.push();
     assert.equal(f.saved.get('agenda:a1').title, '已移除事项'); assert.equal(f.saved.get('agenda:a1').pinned, false);
+  });
+  await test('heartTraces per-floor generation links with BaiBai main NPCs and syncs phone_heart back', async () => {
+    const f = syncFixture();
+    f.actions.bridge = { context: () => ({ chat: [
+      { is_user: true, name: '玩家', mes: '给阿青递了一杯热拿铁。' },
+      { is_user: false, name: '阿青', mes: '阿青低头接过杯子，指尖轻轻碰到了你的手背。' }
+    ] }) };
+    f.actions.router = { call: async (_mod, req) => {
+      assert(req.user.includes('#2楼'));
+      assert(req.user.includes('给阿青递了一杯热拿铁'));
+      return JSON.stringify({
+        traces: [{
+          author: '阿青',
+          title: '杯沿的温度',
+          mood: '耳尖微热',
+          heartbeat: '82% · 升温',
+          stage: '暗生情愫',
+          surface: '镇定地道谢并小口喝拿铁',
+          replyToFloor: '其实刚才指尖碰到你的时候，我差点没拿稳杯子。',
+          text: '他递过来的拿铁热度刚刚好，可我满脑子都是刚才指尖相触的那一秒。',
+          secret: '下次想主动帮他系围巾。'
+        }]
+      });
+    } };
+    const rows = await f.actions.heartTraces(['a'], { floor: 1 });
+    assert.equal(rows.length, 1);
+    assert.equal(f.data.diary.length, 1);
+    assert.equal(f.data.diary[0].kind, 'heart');
+    assert.equal(f.data.diary[0].floor, 1);
+    assert.equal(f.data.diary[0].mood, '耳尖微热');
+    await f.link.push({ force: true });
+    const heartNote = [...f.saved.values()].find(n => n.kind === 'phone_heart');
+    assert(heartNote, 'phone_heart must be pushed to BaiBai Book');
+    assert(heartNote.title.includes('#2楼'));
+    // Test heartFollowup
+    f.actions.router = { call: async () => JSON.stringify({ mood: '慌乱掩饰', answer: '我才没有盯着你看，只是在看窗外的雨……好吧，其实有一点。' }) };
+    const fu = await f.actions.heartFollowup(f.data.diary[0].id, '刚才是不是在偷看我？');
+    assert.equal(fu.mood, '慌乱掩饰');
+    assert.equal(f.data.diary[0].followups.length, 1);
+  });
+  await test('syncBaibaiMainNpcsToContacts imports main NPCs from BaiBai Book into phone contacts', () => {
+    const s = B.freshPhone();
+    const res = B.syncBaibaiMainNpcsToContacts(s, {
+      mainNpcs: [
+        { name: '春山未夜', important: true, present: true, relation: '青梅竹马', affinityInner: 85, affinityText: '内心好感:情根深种(85)', condition: '在窗边看书' }
+      ]
+    });
+    assert.equal(res.added.length, 1);
+    assert(s.contacts.some(c => c.name === '春山未夜'));
+    B.validatePhone(s);
+  });
+  await test('tpModuleMeta supports multi-select delete and one-click clear across all phone modules', () => {
+    const s = B.freshPhone();
+    const c1 = { id: 'c1', name: '角色甲', age: 20, bio: '人设', status: '空闲', recognized: true, reachable: true };
+    const c2 = { id: 'c2', name: '角色乙', age: 20, bio: '人设', status: '忙碌', recognized: true, reachable: true };
+    s.contacts.push(c1, c2);
+    s.threads.push({ id: 't1', kind: 'direct', title: '角色甲', members: ['c1'], messages: [{ id: 'm1', role: 'user', author: 'user', text: '你好', ts: 1 }, { id: 'm2', role: 'character', author: 'c1', text: '在的', ts: 2, read: true }], pending: [{ id: 'p1', text: '待发1' }], draft: '', muted: false, createdAt: 1 });
+    s.feed.push({ id: 'f1', author: 'c1', text: '动态1', ts: 1, likes: [], comments: [] }, { id: 'f2', author: 'c2', text: '动态2', ts: 2, likes: [], comments: [] });
+    s.diary.push({ id: 'd1', title: '普通日记', text: '内容1', ts: 1, status: 'confirmed' }, { id: 'h1', kind: 'heart', floor: 2, author: 'c1', title: '心迹1', text: '心动内容', ts: 2, status: 'confirmed' });
+    s.notes.push({ id: 'n1', title: '便签1', text: '便签内容', ts: 1 });
+    s.memories.push({ id: 'mem1', kind: 'manual', title: '记忆1', text: '记忆内容', audience: ['user'], sources: [] });
+    s.agenda.push({ id: 'ag1', title: '日程1', date: '2026-10-02', status: 'proposed', members: ['c1'] });
+    s.tasks.push({ id: 'tk1', title: '清单1', category: '生活', progress: 0, target: 1, done: false });
+    s.items.push({ id: 'it1', title: '护身符', quantity: 1, note: '神社求的' });
+    s.album.push({ id: 'al1', mediaId: 'url:https://example.com/a.png', title: '照片1', ts: 1 });
+    s.places.push({ id: 'pl1', title: '秘密基地', note: '山坡上' });
+    s.arc.outline.beats.push({ id: 'b1', title: '第一章', type: '主线', scene: '开端' }, { id: 'b2', title: '第二章', type: '主线', scene: '发展' });
+    s.arc.outline.cursor = 1;
+    s.arc.lines.items.push({ id: 'l1', name: '感情线', stage: '起线', agency: 'world', desc: '升温中' });
+    s.arc.points.days = [{ n: 1, date: '2026-10-02', events: [{ id: 'ev1', type: 'main', title: '偶遇' }] }];
+    s.plans.push({ id: 'pl_a', title: '方向1', summary: '概述', status: 'active', members: ['c1'], beats: [{ id: 'pb1', title: '步骤1', scene: '场景', trigger: '前提', finish: '完成', day: 0, choices: [] }] });
+    s.activePlan = { id: 'pl_a', cursor: 0 };
+    s.logs.push({ id: 'lg1', level: 'info', module: 'chat', message: '完成', ts: 1 });
+    B.validatePhone(s);
+
+    const modules = ['chat:t1', 'outbox', 'feed', 'diary', 'heart', 'notes', 'memories', 'agenda', 'tasks', 'items', 'album', 'places', 'arc_beats', 'arc_lines', 'arc_points', 'plans', 'logs', 'threads', 'contacts'];
+    for (const key of modules) {
+      const meta = B.tpModuleMeta({ data: s }, key);
+      assert(meta && meta.items.length > 0, `module ${key} should have items`);
+      const firstId = meta.items[0].id;
+      const removed = meta.remove(s, new Set([firstId]));
+      assert(removed >= 1, `module ${key} remove should delete at least 1 item`);
+      meta.clear(s);
+      B.validatePhone(s);
+    }
   });
   console.log(`PHONE_MEMORY_OK: ${cases} cases (all generation payloads tested with ON/OFF)`);
 })().catch(e => { console.error(e); process.exitCode = 1; });

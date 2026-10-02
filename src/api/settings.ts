@@ -10,6 +10,23 @@ import { DEFAULT_RECALL_INJECTION_DEPTH, normalizeRecallInjectionDepth } from '@
  * 渠道可配多个;两类摘要任务各指派一个渠道:summary=摘要,resummary=总结。
  */
 
+export const DEFAULT_TEST_PROMPT = '你好，请用一句话介绍你自己并说出你的模型名。';
+
+export interface ChannelLastTest {
+  at: number;
+  ok: boolean;
+  /** 本次测试耗时(毫秒) */
+  ms?: number;
+  /** 模型返回的完整回复或错误信息 */
+  reply?: string;
+  /** 本次实际发送的测试语句 */
+  prompt?: string;
+  /** 是否附带了破限提示词 */
+  withJailbreak?: boolean;
+  /** 简短结论摘要(兼容旧展示与小手机联动接口) */
+  message: string;
+}
+
 export interface ApiChannel {
   id: string;
   /** 显示名 */
@@ -52,15 +69,15 @@ export interface ApiChannel {
    */
   reasoningEffort: string;
   /**
-   * 【融合版】专属测活用语(借鉴小手机的「每方案独立测活」):测试渠道时发送这句话而非固定的「回复 ok」,
-   * 便于确认模型身份/中转站是否偷换模型。空=用内置短句。
+   * 【融合版】专属自定义测试用语(同月夜来信小手机「每方案独立自定义测试」):
+   * 测试渠道时发送这句话,便于查看模型真实回复、确认中转站是否偷换模型。空=用统一默认测试语句。
    */
   testPrompt: string;
-  /** 【融合版】上次测活结果留存(时间/是否成功/摘要),方便一眼看出哪个渠道挂了。 */
-  lastTest?: { at: number; ok: boolean; message: string };
+  /** 【融合版】上次自定义测试结果留存(时间/是否成功/耗时/返回回复/摘要)。 */
+  lastTest?: ChannelLastTest;
 }
 
-export type TaskType = 'summary' | 'resummary';
+export type TaskType = 'summary' | 'resummary' | 'anchor';
 
 /* ======================= 融合版新增设置 ======================= */
 
@@ -218,6 +235,12 @@ export interface UiPrefs {
   orbOpacity: number;
   /** 悬浮球基准尺寸(px,32–80,默认 48)。书签按比例放宽高,圆/方为等边边长。 */
   orbSize: number;
+  /** 统一自定义测试语句(与月夜来信小手机一致,默认「你好，请用一句话介绍你自己并说出你的模型名。」) */
+  testPrompt: string;
+  /** 自定义测试是否默认附带破限提示词 */
+  testWithJailbreak: boolean;
+  /** 副 API 渠道请求失败时是否自动顺延尝试其他可用渠道 */
+  channelFallback: boolean;
 }
 
 /** 字数详尽档位:detailed=详细(默认),concise=精简(摘要/总结/二次总结字数一并降低)。仅影响内置模板。 */
@@ -405,6 +428,9 @@ export function defaults(): ApiSettings {
       orbShape: 'bookmark',
       orbOpacity: 62,
       orbSize: 48,
+      testPrompt: DEFAULT_TEST_PROMPT,
+      testWithJailbreak: false,
+      channelFallback: true,
     },
     prompts: { summary: '', resummary: '', resummary2: '', jailbreak: '', timeTag: '' },
     verbosity: 'detailed',
@@ -428,7 +454,7 @@ export function defaults(): ApiSettings {
       },
     },
     channels: [],
-    assignments: { summary: '', resummary: '' },
+    assignments: { summary: '', resummary: '', anchor: '' },
     autoSummaryEnabled: true,
     summaryOnlyMode: false,
     injection: { sceneFocus: true, lifeDetails: true, protagonist: true, npcs: true, npcAffinity: true, items: true, scenes: true },
@@ -550,6 +576,15 @@ export function normalize(raw: unknown): ApiSettings {
       typeof ru.orbSize === 'number' && Number.isFinite(ru.orbSize)
         ? Math.min(80, Math.max(32, Math.round(ru.orbSize)))
         : d.ui.orbSize,
+    testPrompt: typeof ru.testPrompt === 'string' ? ru.testPrompt.slice(0, 2000) : d.ui.testPrompt,
+    testWithJailbreak: typeof ru.testWithJailbreak === 'boolean' ? ru.testWithJailbreak : d.ui.testWithJailbreak,
+    channelFallback: typeof ru.channelFallback === 'boolean' ? ru.channelFallback : d.ui.channelFallback,
+  };
+  const ra = ((raw as Partial<ApiSettings>).assignments ?? {}) as Partial<Record<TaskType, string>>;
+  merged.assignments = {
+    summary: typeof ra.summary === 'string' ? ra.summary : '',
+    resummary: typeof ra.resummary === 'string' ? ra.resummary : '',
+    anchor: typeof ra.anchor === 'string' ? ra.anchor : '',
   };
   // excludedChars 必须是字符串数组,旧值类型不符时回退空数组
   merged.excludedChars = Array.isArray(merged.excludedChars)
@@ -734,7 +769,17 @@ function normalizeChannel(c: Partial<ApiChannel>): ApiChannel {
     testPrompt: typeof c.testPrompt === 'string' ? c.testPrompt : '',
     lastTest:
       c.lastTest && typeof c.lastTest === 'object' && typeof c.lastTest.at === 'number'
-        ? { at: c.lastTest.at, ok: !!c.lastTest.ok, message: String(c.lastTest.message ?? '') }
+        ? {
+            at: c.lastTest.at,
+            ok: !!c.lastTest.ok,
+            ...(typeof c.lastTest.ms === 'number' && Number.isFinite(c.lastTest.ms)
+              ? { ms: Math.max(0, Math.round(c.lastTest.ms)) }
+              : {}),
+            ...(typeof c.lastTest.reply === 'string' ? { reply: c.lastTest.reply } : {}),
+            ...(typeof c.lastTest.prompt === 'string' ? { prompt: c.lastTest.prompt } : {}),
+            ...(typeof c.lastTest.withJailbreak === 'boolean' ? { withJailbreak: c.lastTest.withJailbreak } : {}),
+            message: String(c.lastTest.message ?? ''),
+          }
         : undefined,
   };
 }
@@ -848,6 +893,9 @@ function applySharedChannels(store: SharedChannelsStore): void {
   }
   if (apiSettings.assignments.resummary && !ids.has(apiSettings.assignments.resummary)) {
     apiSettings.assignments.resummary = '';
+  }
+  if (apiSettings.assignments.anchor && !ids.has(apiSettings.assignments.anchor)) {
+    apiSettings.assignments.anchor = '';
   }
 }
 
@@ -1156,9 +1204,141 @@ export function engineActiveHere(): boolean {
 }
 
 export function getChannelForTask(task: TaskType): ApiChannel | null {
-  const id = apiSettings.assignments[task];
+  const id = apiSettings.assignments[task] || (task === 'anchor' ? apiSettings.assignments.resummary : '');
   if (!id) return null;
   return apiSettings.channels.find(c => c.id === id) ?? null;
+}
+
+/**
+ * 获取某任务的备选兜底渠道列表(排除主渠道,仅返回已填写 url 与 model 的渠道;最近测活成功的优先)。
+ */
+export function getFallbackChannels(primaryId: string): ApiChannel[] {
+  if (!apiSettings.ui.channelFallback) return [];
+  return apiSettings.channels
+    .filter(c => c.id !== primaryId && c.url.trim().length > 0 && c.model.trim().length > 0)
+    .slice()
+    .sort((a, b) => {
+      const aOk = a.lastTest?.ok ? 1 : 0;
+      const bOk = b.lastTest?.ok ? 1 : 0;
+      return bOk - aOk;
+    });
+}
+
+/**
+ * 一键复制指定渠道(保留地址、密钥、参数与测试用语,生成新 ID 并插入原渠道下方)。
+ */
+export function duplicateChannel(sourceId: string): ApiChannel | null {
+  const idx = apiSettings.channels.findIndex(c => c.id === sourceId);
+  if (idx < 0) return null;
+  const src = apiSettings.channels[idx];
+  chanSeq += 1;
+  const copy: ApiChannel = normalizeChannel({
+    ...JSON.parse(JSON.stringify(src)),
+    id: `ch_${Date.now()}_${chanSeq}`,
+    name: `${src.name || '新渠道'} (副本)`,
+    lastTest: undefined,
+  });
+  apiSettings.channels.splice(idx + 1, 0, copy);
+  return copy;
+}
+
+/**
+ * 导出全部副 API 渠道为 JSON 字符串(可选是否包含密钥)。
+ */
+export function exportChannelsJson(includeKeys = true): string {
+  const list = apiSettings.channels.map(c => {
+    const clone = JSON.parse(JSON.stringify(c)) as ApiChannel;
+    if (!includeKeys) clone.key = '';
+    delete clone.lastTest;
+    return clone;
+  });
+  return JSON.stringify(
+    {
+      schema: 'baibai-api-channels-v1',
+      exportedAt: Date.now(),
+      channels: list,
+    },
+    null,
+    2,
+  );
+}
+
+/**
+ * 从 JSON 字符串导入副 API 渠道(支持 merge 合并或 replace 覆盖)。
+ */
+export function importChannelsJson(
+  rawJson: string,
+  mode: 'merge' | 'replace' = 'merge',
+): { added: number; updated: number; total: number } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    throw new Error('JSON 格式无效，请检查粘贴或上传的内容');
+  }
+  const rawList: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { channels?: unknown[] }).channels)
+      ? (parsed as { channels: unknown[] }).channels
+      : parsed && typeof parsed === 'object' && ('url' in parsed || 'model' in parsed)
+        ? [parsed]
+        : [];
+  if (!rawList.length) {
+    throw new Error('未在 JSON 中找到有效的渠道配置数组');
+  }
+  const normalized = rawList
+    .filter((x): x is Partial<ApiChannel> => !!x && typeof x === 'object')
+    .map(c => normalizeChannel(c));
+  if (!normalized.length) {
+    throw new Error('没有可导入的有效渠道项');
+  }
+
+  let added = 0;
+  let updated = 0;
+  if (mode === 'replace') {
+    const seen = new Set<string>();
+    const clean = normalized.map(c => {
+      let cid = c.id;
+      if (!cid || seen.has(cid)) {
+        chanSeq += 1;
+        cid = `ch_${Date.now()}_${chanSeq}`;
+      }
+      seen.add(cid);
+      return { ...c, id: cid };
+    });
+    added = clean.length;
+    apiSettings.channels = clean;
+  } else {
+    for (const item of normalized) {
+      const existing = apiSettings.channels.find(
+        c => c.id === item.id || (c.name === item.name && c.url === item.url && c.model === item.model),
+      );
+      if (existing) {
+        existing.name = item.name || existing.name;
+        existing.url = item.url || existing.url;
+        if (item.key) existing.key = item.key;
+        existing.model = item.model || existing.model;
+        existing.temperature = item.temperature;
+        existing.maxTokens = item.maxTokens;
+        existing.timeoutSec = item.timeoutSec;
+        existing.stream = item.stream;
+        existing.prefill = item.prefill;
+        existing.excludeParams = item.excludeParams;
+        existing.reasoningEffort = item.reasoningEffort;
+        if (item.testPrompt) existing.testPrompt = item.testPrompt;
+        updated += 1;
+      } else {
+        let cid = item.id;
+        if (!cid || apiSettings.channels.some(c => c.id === cid)) {
+          chanSeq += 1;
+          cid = `ch_${Date.now()}_${chanSeq}`;
+        }
+        apiSettings.channels.push({ ...item, id: cid });
+        added += 1;
+      }
+    }
+  }
+  return { added, updated, total: apiSettings.channels.length };
 }
 
 /**

@@ -254,3 +254,77 @@ export async function rewriteQuery(signal?: AbortSignal): Promise<RewriteResult>
   if (!parsed.queries.length) throw new Error('Query 重写未解析出任何检索 query');
   return parsed;
 }
+
+/**
+ * 测试 Query Rewrite 端点连通性(不依赖当前打开的聊天,发送最小重写测试样例)。
+ */
+export async function testQueryRewriteEndpoint(): Promise<{
+  ok: boolean;
+  ms: number;
+  detail?: string;
+  message: string;
+}> {
+  const t0 = Date.now();
+  try {
+    const ep = resolveVectorModel('queryRewrite');
+    if (!ep.model.trim()) throw new Error('请先填写 Query 重写模型名');
+    const endpoint = chatCompletionsEndpoint(ep.url);
+    if (!endpoint) throw new Error('请先填写 Query 重写（或 Embedding 基准）API 地址');
+
+    const messages: ChatMsg[] = [
+      {
+        role: 'system',
+        content: '你是检索查询重写助手。请严格输出两行：\nINTENT: 检索两人关于神社参拜的约定\nQ1: 神社 参拜 约定',
+      },
+      {
+        role: 'user',
+        content: '请按要求输出 INTENT 和 Q1。',
+      },
+    ];
+
+    const resp = await fetchWithTimeoutRetry(
+      endpoint,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key || ''}` },
+        body: JSON.stringify({
+          model: ep.model,
+          messages,
+          temperature: 0.1,
+          max_tokens: 256,
+          stream: false,
+          enable_thinking: false,
+        }),
+      },
+      { timeoutSec: ep.timeoutSec, retries: ep.retries, label: 'Query 重写测试' },
+    );
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '');
+      throw new Error(`Query 重写 API ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const json = await resp.json();
+    const content = json?.choices?.[0]?.message?.content;
+    const raw = typeof content === 'string' ? content.trim() : '';
+    if (!raw) throw new Error('Query 重写返回空内容');
+    const parsed = parseResponse(raw);
+    const ms = Math.max(1, Date.now() - t0);
+    const preview = parsed.queries.length
+      ? `INTENT: ${parsed.intent || '-'} | Q: ${parsed.queries.join(' / ')}`
+      : raw.replace(/\s+/g, ' ').slice(0, 120);
+    return {
+      ok: true,
+      ms,
+      detail: preview,
+      message: `✓ Query 重写连通正常 (${(ms / 1000).toFixed(2)}s) · 返回: ${preview}`,
+    };
+  } catch (e) {
+    const ms = Math.max(1, Date.now() - t0);
+    const err = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      ms,
+      message: `✗ ${err}`,
+    };
+  }
+}
+

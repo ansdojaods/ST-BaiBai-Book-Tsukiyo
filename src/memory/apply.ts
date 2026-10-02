@@ -1430,10 +1430,28 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
   if (d.varOps?.length) applyVarOps(mem.vars, d.varOps);
 }
 
+const DERIVE_CHECKPOINT_STEP = 25;
+let lastCheckpointChat: STMessage[] | null = null;
+let lastCheckpointFloor = 0;
+let lastCheckpointKey = '';
+let lastCheckpointState = '';
+
+function buildPrefixLeafKey(chat: STMessage[], end: number, templates: unknown): string {
+  const parts: string[] = [JSON.stringify(templates ?? null)];
+  for (let i = 0; i < end; i++) {
+    const m = chat[i];
+    if (!m || m.extra?.bbs_omit || !leafValid(m)) continue;
+    const leaf = getLeaf(m)!;
+    parts.push(`${i}:${leaf.id}:${leaf.createdAt}:${m.swipe_id ?? 0}:${JSON.stringify(leaf.delta)}`);
+  }
+  return parts.join('|');
+}
+
 /**
  * 从 chat 重放出结构化状态。
  * 按**楼层物理顺序**扫 chat,对每条有效叶子 fold 其 delta(楼层序即叙事序,删消息后天然正确)。
  * 压缩节点只压文本、不带 delta、不参与重放。
+ * 长对话(>= 25 楼)自动启用前缀检查点缓存,避免批量补摘与连续生成时重复从 0 楼全量重放。
  * @param upToExclusive 仅重放索引 < 该值的楼层(截断到被分析楼之前;省略=全部)。
  */
 export function deriveMemory(
@@ -1446,13 +1464,54 @@ export function deriveMemory(
   mem.vars = expandVarMacros(mergeTemplates(templates));
   if (!chat) return { state: mem.state, protagonist: mem.protagonist, items: mem.items, plans: mem.plans, scenes: mem.scenes, npcs: mem.npcs, itemLog: mem.itemLog, lifeDetails: mem.lifeDetails, vars: mem.vars };
   const end = typeof upToExclusive === 'number' ? Math.min(upToExclusive, chat.length) : chat.length;
-  for (let i = 0; i < end; i++) {
-    if (chat[i]?.extra?.bbs_omit) continue; // 番外楼:不参与派生重放
-    if (!leafValid(chat[i])) continue;
-    const leaf = getLeaf(chat[i])!;
-    // 日志用「故事内时间」:结束时间优先(本段最后时刻),缺则起始,再缺旧 timeLabel,最后空串
-    const time = optText(leaf.timeEnd) || optText(leaf.timeStart) || optText(leaf.timeLabel) || '';
-    applyStoredDeltaTo(mem, leaf.delta, { id: leaf.id, createdAt: leaf.createdAt, time });
+
+  let startIdx = 0;
+  const targetCheckpointFloor = end >= DERIVE_CHECKPOINT_STEP ? Math.floor(end / DERIVE_CHECKPOINT_STEP) * DERIVE_CHECKPOINT_STEP : 0;
+
+  if (
+    lastCheckpointChat === chat &&
+    lastCheckpointFloor > 0 &&
+    lastCheckpointFloor <= end &&
+    lastCheckpointState &&
+    buildPrefixLeafKey(chat, lastCheckpointFloor, templates) === lastCheckpointKey
+  ) {
+    try {
+      const restored = JSON.parse(lastCheckpointState) as Pick<
+        BaibaiMemory,
+        'state' | 'protagonist' | 'items' | 'plans' | 'scenes' | 'npcs' | 'itemLog' | 'lifeDetails' | 'vars'
+      >;
+      Object.assign(mem, restored);
+      startIdx = lastCheckpointFloor;
+    } catch {
+      startIdx = 0;
+    }
+  }
+
+  for (let i = startIdx; i < end; i++) {
+    if (chat[i]?.extra?.bbs_omit) {
+      /* 番外楼:不参与派生重放 */
+    } else if (leafValid(chat[i])) {
+      const leaf = getLeaf(chat[i])!;
+      // 日志用「故事内时间」:结束时间优先(本段最后时刻),缺则起始,再缺旧 timeLabel,最后空串
+      const time = optText(leaf.timeEnd) || optText(leaf.timeStart) || optText(leaf.timeLabel) || '';
+      applyStoredDeltaTo(mem, leaf.delta, { id: leaf.id, createdAt: leaf.createdAt, time });
+    }
+    if (targetCheckpointFloor > 0 && i + 1 === targetCheckpointFloor && targetCheckpointFloor !== lastCheckpointFloor) {
+      lastCheckpointChat = chat;
+      lastCheckpointFloor = targetCheckpointFloor;
+      lastCheckpointKey = buildPrefixLeafKey(chat, targetCheckpointFloor, templates);
+      lastCheckpointState = JSON.stringify({
+        state: mem.state,
+        protagonist: mem.protagonist,
+        items: mem.items,
+        plans: mem.plans,
+        scenes: mem.scenes,
+        npcs: mem.npcs,
+        itemLog: mem.itemLog.slice(-ITEM_LOG_KEEP),
+        lifeDetails: mem.lifeDetails,
+        vars: mem.vars,
+      });
+    }
   }
   // 只留最近若干条变动(注入/喂模型够用即可,省 token)
   if (mem.itemLog.length > ITEM_LOG_KEEP) mem.itemLog = mem.itemLog.slice(-ITEM_LOG_KEEP);

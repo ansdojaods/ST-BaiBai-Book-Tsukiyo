@@ -20,6 +20,9 @@ import { memory } from '../store';
 import { stripThinkBlocks } from '../timeTag';
 import type { LeafExtra } from '../types';
 import { embedTexts, encodeFloat32Base64 } from './embed';
+export { testEmbeddingEndpoint, testRerankEndpoint, type VectorEndpointTestResult } from './embed';
+export { testQueryRewriteEndpoint } from './rewrite';
+
 import { currentChatId, currentVectorDb } from './scope';
 import { invalidateRecallCache } from './cache';
 

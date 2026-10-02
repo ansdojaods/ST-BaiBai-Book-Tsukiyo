@@ -3,6 +3,7 @@
  * 「联动」页(融合版新增):三块——锚点日记 / 备份·恢复·回收站 / 小手机联动。
  * 只做展示与调用,逻辑全部在 src/anchor、src/backend、src/bridge 里。
  */
+import ChannelTestModals from '@/components/ChannelTestModals.vue';
 import Icon from '@/components/Icon.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import Collapsible from '@/components/Collapsible.vue';
@@ -17,8 +18,17 @@ import { refreshInjection } from '@/memory/inject';
 import { restoreState, createRestorePoint, restoreFromPoint, deleteRestorePoint, buildSnapshot, parseSnapshot, applySnapshot, restoreTrashEntry } from '@/backend/restore';
 import { trashState, trashRemove, trashClear, trashPush } from '@/backend/trash';
 import { buildDiagnostics, downloadJson, copyText } from '@/backend/diagnostics';
-import { externalState, removeExternalNote, clearExternal, setExternalPinned, pushExternalNotes } from '@/bridge/external';
-import { getBrief, listChannels, testChannel as testPhoneChannel, listPhoneProfiles, importPhoneProfile } from '@/bridge/phone';
+import {
+  externalState,
+  removeExternalNote,
+  removeExternalNotes,
+  clearExternal,
+  setExternalPinned,
+  pushExternalNotes,
+  updateExternalNote,
+  type ExternalNote,
+} from '@/bridge/external';
+import { getBrief, listChannels, listPhoneProfiles, importPhoneProfile } from '@/bridge/phone';
 import { newChannel } from '@/api/settings';
 import { computed, ref } from 'vue';
 
@@ -208,10 +218,126 @@ const KIND_LABEL: Record<string, string> = { summary: '总结节点', subtree: '
 /* ================= 小手机联动 ================= */
 const briefPreview = ref('');
 const channels = computed(() => listChannels());
-const testing = ref<Record<string, boolean>>({});
-const EXT_KIND: Record<string, string> = { phone_chat: '手机聊天', phone_promise: '约定', phone_moment: '朋友圈', agenda: '日程', fact: '事实' };
-const extNotesDesc = computed(() => [...externalState.notes].sort((x, y) => y.ts - x.ts));
+const testModals = ref<InstanceType<typeof ChannelTestModals> | null>(null);
+const EXT_KIND: Record<string, string> = {
+  phone_chat: '手机聊天',
+  phone_promise: '约定',
+  phone_moment: '朋友圈',
+  phone_heart: '恋爱心迹',
+  agenda: '日程',
+  fact: '事实',
+};
+const EXT_FILTER_OPTIONS = [
+  { id: 'all', label: '全部' },
+  { id: 'phone_chat', label: '手机聊天' },
+  { id: 'phone_promise', label: '约定' },
+  { id: 'phone_moment', label: '朋友圈' },
+  { id: 'phone_heart', label: '恋爱心迹' },
+  { id: 'agenda', label: '日程' },
+  { id: 'fact', label: '事实' },
+];
+const extFilterKind = ref('all');
+const extSearch = ref('');
+const extSelectMode = ref(false);
+const extSelected = ref<Record<string, boolean>>({});
+const editingExtNote = ref<{
+  id: string;
+  source: string;
+  kind: string;
+  title: string;
+  text: string;
+  time: string;
+  pinned: boolean;
+} | null>(null);
+
+const extNotesDesc = computed(() => {
+  const q = extSearch.value.trim().toLowerCase();
+  return [...externalState.notes]
+    .filter(n => {
+      if (extFilterKind.value !== 'all' && n.kind !== extFilterKind.value) return false;
+      if (!q) return true;
+      return (
+        (n.title ?? '').toLowerCase().includes(q) ||
+        n.text.toLowerCase().includes(q) ||
+        n.source.toLowerCase().includes(q)
+      );
+    })
+    .sort((x, y) => Number(!!y.pinned) - Number(!!x.pinned) || y.ts - x.ts);
+});
 const manualNote = ref('');
+const manualKind = ref('fact');
+
+function extKey(n: { source: string; id: string }): string {
+  return JSON.stringify([n.source, n.id]);
+}
+
+function toggleExtSelectMode() {
+  extSelectMode.value = !extSelectMode.value;
+  extSelected.value = {};
+}
+
+function selectAllFilteredExt() {
+  const next: Record<string, boolean> = { ...extSelected.value };
+  const allChecked = extNotesDesc.value.length > 0 && extNotesDesc.value.every(n => next[extKey(n)]);
+  for (const n of extNotesDesc.value) {
+    next[extKey(n)] = !allChecked;
+  }
+  extSelected.value = next;
+}
+
+const extSelectedCount = computed(() => Object.values(extSelected.value).filter(Boolean).length);
+
+function deleteSelectedExtNotes() {
+  const picked = externalState.notes.filter(n => extSelected.value[extKey(n)]);
+  if (!picked.length) {
+    toast('请先勾选要删除的外部记录', 'warning');
+    return;
+  }
+  ask('批量删除外部记录', `将删除选中的 ${picked.length} 条外部记录（会移入回收站），继续？`, () => {
+    for (const n of picked) {
+      trashPush({ kind: 'external', title: `外部记录:${(n.title || n.text).slice(0, 40)}`, payload: n });
+    }
+    const removed = removeExternalNotes(picked.map(n => ({ id: n.id, source: n.source })));
+    extSelected.value = {};
+    refreshInjection();
+    toast(`已删除 ${removed} 条外部记录`, 'info');
+  });
+}
+
+function openEditExtNote(n: ExternalNote) {
+  editingExtNote.value = {
+    id: n.id,
+    source: n.source,
+    kind: n.kind,
+    title: n.title ?? '',
+    text: n.text,
+    time: n.time ?? '',
+    pinned: !!n.pinned,
+  };
+}
+
+function saveEditExtNote() {
+  const d = editingExtNote.value;
+  if (!d) return;
+  if (!d.text.trim()) {
+    toast('记录正文不能为空', 'warning');
+    return;
+  }
+  updateExternalNote(
+    d.id,
+    {
+      kind: d.kind,
+      title: d.title,
+      text: d.text,
+      time: d.time,
+      pinned: d.pinned,
+    },
+    d.source,
+  );
+  editingExtNote.value = null;
+  refreshInjection();
+  toast('外部记录已更新', 'success');
+}
 
 function previewBrief() {
   try {
@@ -220,17 +346,12 @@ function previewBrief() {
     briefPreview.value = `生成失败:${e instanceof Error ? e.message : String(e)}`;
   }
 }
-async function testOne(id: string) {
-  testing.value = { ...testing.value, [id]: true };
-  try {
-    const r = await testPhoneChannel(id);
-    toast(r.message, r.ok ? 'success' : 'error');
-  } finally {
-    testing.value = { ...testing.value, [id]: false };
-  }
+function testOne(id: string) {
+  const ch = apiSettings.channels.find(c => c.id === id);
+  if (ch) testModals.value?.openSingle(ch);
 }
-async function testAll() {
-  for (const c of channels.value) await testOne(c.id);
+function testAll() {
+  testModals.value?.openBatch();
 }
 function delNote(id: string, source: string) {
   const n = removeExternalNote(id, source);
@@ -248,7 +369,7 @@ function clearNotes() {
 function addManualNote() {
   const t = manualNote.value.trim();
   if (!t) return;
-  pushExternalNotes('manual', [{ kind: 'fact', text: t }]);
+  pushExternalNotes('manual', [{ kind: manualKind.value || 'fact', text: t }]);
   refreshInjection();
   manualNote.value = '';
   toast('已添加', 'success');
@@ -408,15 +529,50 @@ const phoneDetected = computed(() => {
       <pre v-if="briefPreview" class="bbs-fu-pre bbs-fu-pre-scroll">{{ briefPreview }}</pre>
 
       <div class="bbs-rule" />
-      <h3 class="bbs-fu-sub">外部记录({{ externalState.notes.length }})</h3>
+      <h3 class="bbs-fu-sub">外部记录({{ extNotesDesc.length }} / {{ externalState.notes.length }})</h3>
       <div class="bbs-fu-actions">
-        <input v-model="manualNote" class="bbs-input bbs-fu-grow" type="text" placeholder="手动补一条正文之外的事实(回车添加)" @keydown.enter.prevent="addManualNote" />
-        <button class="bbs-btn" type="button" @click="addManualNote">添加</button>
-        <button class="bbs-btn" type="button" :disabled="!externalState.notes.length" @click="clearNotes">清空</button>
+        <select v-model="manualKind" class="bbs-input" style="width: auto; min-width: 100px">
+          <option value="fact">事实</option>
+          <option value="phone_chat">手机聊天</option>
+          <option value="phone_promise">约定</option>
+          <option value="phone_moment">朋友圈</option>
+          <option value="phone_heart">恋爱心迹</option>
+          <option value="agenda">日程</option>
+        </select>
+        <input v-model="manualNote" class="bbs-input bbs-fu-grow" type="text" placeholder="手动补一条正文之外的记录(回车添加)" @keydown.enter.prevent="addManualNote" />
+        <button class="bbs-btn bbs-btn-primary" type="button" @click="addManualNote">添加</button>
+        <button class="bbs-btn" type="button" :disabled="!externalState.notes.length" @click="toggleExtSelectMode">
+          {{ extSelectMode ? '退出多选' : '多选删除' }}
+        </button>
+        <button class="bbs-btn" type="button" :disabled="!externalState.notes.length" @click="clearNotes">一键清空</button>
+      </div>
+      <div v-if="externalState.notes.length" class="bbs-fu-actions" style="margin-top: 6px">
+        <button
+          v-for="opt in EXT_FILTER_OPTIONS"
+          :key="opt.id"
+          type="button"
+          class="bbs-btn bbs-btn-sm"
+          :class="{ 'bbs-btn-primary': extFilterKind === opt.id }"
+          @click="extFilterKind = opt.id"
+        >
+          {{ opt.label }}
+        </button>
+        <input v-model="extSearch" class="bbs-input" style="max-width: 180px; padding: 4px 8px; font-size: 12px" type="text" placeholder="搜索记录关键词…" />
+      </div>
+      <div v-if="extSelectMode && externalState.notes.length" class="bbs-fu-actions" style="margin-top: 6px">
+        <button class="bbs-btn bbs-btn-sm" type="button" @click="selectAllFilteredExt">全选/反选当前筛选</button>
+        <button class="bbs-btn bbs-btn-sm bbs-btn-danger" type="button" :disabled="!extSelectedCount" @click="deleteSelectedExtNotes">
+          删除已选 ({{ extSelectedCount }})
+        </button>
       </div>
       <p v-if="externalState.lastPushAt" class="bbs-fu-note">最近一次推送:{{ fmtTime(externalState.lastPushAt) }}(来源 {{ externalState.lastSource }})</p>
-      <div v-if="!extNotesDesc.length" class="bbs-empty">还没有外部记录。小手机 1.6 联动版会在手机聊天/约定变化后自动推送。</div>
-      <div v-for="n in extNotesDesc" :key="JSON.stringify([n.source, n.id])" class="bbs-fu-row">
+      <div v-if="!extNotesDesc.length" class="bbs-empty">
+        {{ externalState.notes.length ? '当前筛选条件下没有外部记录。' : '还没有外部记录。小手机 1.6 联动版会在手机聊天/约定/心迹变化后自动推送。' }}
+      </div>
+      <div v-for="n in extNotesDesc" :key="extKey(n)" class="bbs-fu-row">
+        <label v-if="extSelectMode" style="display: flex; align-items: center; padding-right: 6px; cursor: pointer">
+          <input v-model="extSelected[extKey(n)]" type="checkbox" class="bbs-fu-check" />
+        </label>
         <div class="bbs-fu-row-main">
           <span class="bbs-fu-badge">{{ EXT_KIND[n.kind] ?? n.kind }}</span>
           <span v-if="n.pinned" class="bbs-fu-badge bbs-fu-badge-on">置顶</span>
@@ -425,15 +581,16 @@ const phoneDetected = computed(() => {
           <div class="bbs-fu-row-sub">{{ n.source }}{{ n.time ? ` · ${n.time}` : '' }}{{ typeof n.floor === 'number' ? ` · #${n.floor}` : '' }} · {{ fmtTime(n.ts) }}</div>
         </div>
         <div class="bbs-fu-card-acts">
+          <button class="bbs-fu-act" type="button" title="编辑" @click="openEditExtNote(n)"><Icon name="edit" /></button>
           <button class="bbs-fu-act" type="button" :title="n.pinned ? '取消置顶' : '置顶'" @click="setExternalPinned(n.id, !n.pinned, n.source); refreshInjection()"><Icon name="pin" /></button>
           <button class="bbs-fu-act bbs-fu-act-del" type="button" title="移入回收站" @click="delNote(n.id, n.source)"><Icon name="trash" /></button>
         </div>
       </div>
 
       <div class="bbs-rule" />
-      <h3 class="bbs-fu-sub">API 渠道测活(柏宝书副 API,手机可借用)</h3>
+      <h3 class="bbs-fu-sub">API 渠道自定义测试(柏宝书副 API,手机可借用)</h3>
       <div class="bbs-fu-actions">
-        <button class="bbs-btn" type="button" :disabled="!channels.length" @click="testAll">全部测活</button>
+        <button class="bbs-btn" type="button" :disabled="!channels.length" @click="testAll"><Icon name="plug" /> 批量测试</button>
         <button class="bbs-btn" type="button" @click="refreshPhoneProfiles">读取小手机 API 方案</button>
       </div>
       <div v-if="phoneProfiles.length" class="bbs-fu-note">小手机里的自定义方案(可一键导入为柏宝书渠道;手机端也可反向导入柏宝书渠道):</div>
@@ -450,13 +607,17 @@ const phoneDetected = computed(() => {
       <div v-for="c in channels" :key="c.id" class="bbs-fu-row">
         <div class="bbs-fu-row-main">
           <strong>{{ c.name }}</strong> <span class="bbs-fu-row-text">{{ c.model }} @ {{ c.host || '(未填地址)' }}</span>
+          <div v-if="c.testPrompt" class="bbs-fu-row-sub">测试用语：{{ c.testPrompt }}</div>
           <div class="bbs-fu-row-sub">
-            <span v-if="c.lastTest" :class="c.lastTest.ok ? 'bbs-fu-ok' : 'bbs-fu-bad'">{{ c.lastTest.ok ? '✓' : '✗' }} {{ fmtTime(c.lastTest.at) }} · {{ c.lastTest.message }}</span>
-            <span v-else>尚未测活</span>
+            <span v-if="c.lastTest" :class="c.lastTest.ok ? 'bbs-fu-ok' : 'bbs-fu-bad'">
+              {{ c.lastTest.ok ? '✓ 可用' : '✗ 失败' }}<template v-if="c.lastTest.ms"> · {{ (c.lastTest.ms / 1000).toFixed(1) }}s</template> · {{ fmtTime(c.lastTest.at) }}
+            </span>
+            <span v-else>尚未测试</span>
           </div>
+          <pre v-if="c.lastTest && (c.lastTest.reply || c.lastTest.message)" class="bbs-fu-reply">{{ c.lastTest.ok ? '回复：' : '失败：' }}{{ c.lastTest.reply || c.lastTest.message }}</pre>
         </div>
         <div class="bbs-fu-card-acts">
-          <button class="bbs-btn" type="button" :disabled="testing[c.id]" @click="testOne(c.id)">{{ testing[c.id] ? '测试中…' : '测活' }}</button>
+          <button class="bbs-btn" type="button" @click="testOne(c.id)">自定义测试</button>
         </div>
       </div>
     </div>
@@ -499,6 +660,48 @@ const phoneDetected = computed(() => {
       </div>
     </ModalMask>
 
+    <ModalMask :open="!!editingExtNote" @close="editingExtNote = null">
+      <div v-if="editingExtNote" class="bbs-modal bbs-fu-modal-wide" role="dialog" aria-modal="true" aria-label="编辑外部记录">
+        <header class="bbs-modal-head">
+          <span class="bbs-modal-title">编辑外部记录</span>
+          <button class="bbs-fu-act" type="button" title="关闭" @click="editingExtNote = null"><Icon name="close" /></button>
+        </header>
+        <div class="bbs-fu-grid2">
+          <label class="bbs-modal-field">
+            <span class="bbs-modal-label">分类</span>
+            <select v-model="editingExtNote.kind" class="bbs-input">
+              <option value="fact">事实</option>
+              <option value="phone_chat">手机聊天</option>
+              <option value="phone_promise">约定</option>
+              <option value="phone_moment">朋友圈</option>
+              <option value="phone_heart">恋爱心迹</option>
+              <option value="agenda">日程</option>
+            </select>
+          </label>
+          <label class="bbs-modal-field">
+            <span class="bbs-modal-label">故事内时间(可选)</span>
+            <input v-model="editingExtNote.time" class="bbs-input" type="text" placeholder="如 2026-04-09 21:00" />
+          </label>
+        </div>
+        <label class="bbs-modal-field">
+          <span class="bbs-modal-label">标题(可选)</span>
+          <input v-model="editingExtNote.title" class="bbs-input" type="text" maxlength="120" />
+        </label>
+        <label class="bbs-modal-field">
+          <span class="bbs-modal-label">正文</span>
+          <textarea v-model="editingExtNote.text" class="bbs-input bbs-fu-ta" rows="6" maxlength="4000" />
+        </label>
+        <label class="bbs-fu-switch">
+          <span>置顶（注入时优先保留）</span>
+          <input v-model="editingExtNote.pinned" type="checkbox" class="bbs-fu-check" />
+        </label>
+        <footer class="bbs-modal-foot">
+          <button class="bbs-btn" type="button" @click="editingExtNote = null">取消</button>
+          <button class="bbs-btn bbs-btn-primary" type="button" @click="saveEditExtNote">保存</button>
+        </footer>
+      </div>
+    </ModalMask>
+
     <ModalMask :open="!!confirm" top-layer @close="confirm = null">
       <div v-if="confirm" class="bbs-modal" role="alertdialog" aria-modal="true" :aria-label="confirm.title">
         <header class="bbs-modal-head"><span class="bbs-modal-title">{{ confirm.title }}</span></header>
@@ -506,6 +709,8 @@ const phoneDetected = computed(() => {
         <footer class="bbs-modal-foot"><button class="bbs-btn" type="button" @click="confirm = null">取消</button><button class="bbs-btn bbs-btn-primary" type="button" @click="runConfirm">继续</button></footer>
       </div>
     </ModalMask>
+
+    <ChannelTestModals ref="testModals" />
   </section>
 </template>
 
@@ -740,6 +945,22 @@ const phoneDetected = computed(() => {
 }
 .bbs-fu-bad {
   color: var(--bbs-danger, #c0392b);
+}
+.bbs-fu-reply {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--bbs-line);
+  border-radius: var(--bbs-radius-sm);
+  background: var(--bbs-surface);
+  color: var(--bbs-ink);
+  font-family: var(--bbs-font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  user-select: text;
 }
 .bbs-fu-ta {
   width: 100%;

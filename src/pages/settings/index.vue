@@ -1,11 +1,23 @@
 <script setup lang="ts">
+import ChannelTestModals from '@/components/ChannelTestModals.vue';
 import Collapsible from '@/components/Collapsible.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import BbsSelect from '@/components/BbsSelect.vue';
 import Icon from '@/components/Icon.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import { fetchModels, testChannel } from '@/api/client';
-import { apiSettings, newChannel, resolveVectorModel, sanitizeTagName, type ApiChannel, type BacklogPolicy, type Verbosity } from '@/api/settings';
+import {
+  apiSettings,
+  duplicateChannel,
+  exportChannelsJson,
+  importChannelsJson,
+  newChannel,
+  resolveVectorModel,
+  sanitizeTagName,
+  type ApiChannel,
+  type BacklogPolicy,
+  type Verbosity,
+} from '@/api/settings';
 import { getContext } from '@/st/context';
 import {
   JAILBREAK_PROMPT,
@@ -18,7 +30,13 @@ import {
   type PromptMacro,
 } from '@/memory/prompts';
 import { TIME_TAG_PROMPT } from '@/memory/timeTag';
-import { clearVectorIndex, syncVectorIndex } from '@/memory/vector';
+import {
+  clearVectorIndex,
+  syncVectorIndex,
+  testEmbeddingEndpoint,
+  testQueryRewriteEndpoint,
+  testRerankEndpoint,
+} from '@/memory/vector';
 import { resetVectorStoreProbe, vectorBackendKind } from '@/memory/vector/store';
 import { checkForUpdate, performUpdate, updateState } from '@/memory/update';
 import { recallDebug } from '@/memory/vector/debug';
@@ -184,33 +202,131 @@ function removeChannel(id: string) {
   const list = channelsOf(scope);
   const idx = list.findIndex(c => c.id === id);
   if (idx >= 0) list.splice(idx, 1);
-  // 清理指派:副 API 清两类摘要指派(向量已改扁平端点,不再走渠道系统)
+  // 清理指派:副 API 清三类任务指派(向量已改扁平端点,不再走渠道系统)
   if (scope === 'api') {
     if (apiSettings.assignments.summary === id) apiSettings.assignments.summary = '';
     if (apiSettings.assignments.resummary === id) apiSettings.assignments.resummary = '';
+    if (apiSettings.assignments.anchor === id) apiSettings.assignments.anchor = '';
+  }
+}
+
+function handleDuplicateChannel(id: string) {
+  const copy = duplicateChannel(id);
+  if (copy) toast(`已复制渠道「${copy.name}」`, 'success');
+}
+
+const channelIoOpen = ref(false);
+const channelIoMode = ref<'export' | 'import'>('export');
+const channelIoIncludeKeys = ref(true);
+const channelIoImportMode = ref<'merge' | 'replace'>('merge');
+const channelIoText = ref('');
+const channelIoFile = ref<HTMLInputElement | null>(null);
+
+function openChannelExport() {
+  channelIoMode.value = 'export';
+  channelIoIncludeKeys.value = true;
+  channelIoText.value = exportChannelsJson(true);
+  channelIoOpen.value = true;
+}
+
+function refreshExportText() {
+  if (channelIoMode.value === 'export') {
+    channelIoText.value = exportChannelsJson(channelIoIncludeKeys.value);
+  }
+}
+
+function openChannelImport() {
+  channelIoMode.value = 'import';
+  channelIoImportMode.value = 'merge';
+  channelIoText.value = '';
+  channelIoOpen.value = true;
+}
+
+async function copyChannelIoText() {
+  try {
+    await navigator.clipboard.writeText(channelIoText.value);
+    toast('已复制渠道 JSON 到剪贴板', 'success');
+  } catch {
+    toast('复制失败，请手动全选文本框复制', 'warning');
+  }
+}
+
+function downloadChannelIoJson() {
+  const blob = new Blob([channelIoText.value], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `baibai-api-channels-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function triggerChannelIoFile() {
+  channelIoFile.value?.click();
+}
+
+async function onChannelIoFileChange(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  try {
+    channelIoText.value = await file.text();
+  } catch {
+    toast('读取 JSON 文件失败', 'error');
+  }
+}
+
+function confirmChannelImport() {
+  try {
+    const r = importChannelsJson(channelIoText.value, channelIoImportMode.value);
+    channelIoOpen.value = false;
+    toast(`导入完成：新增 ${r.added} 个，更新 ${r.updated} 个（共 ${r.total} 个渠道）`, 'success');
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e), 'error');
   }
 }
 
 const testing = ref<Record<string, string>>({});
+const testingRunning = ref<Record<string, boolean>>({});
+const testModals = ref<InstanceType<typeof ChannelTestModals> | null>(null);
+
 async function doTest(ch: ApiChannel) {
+  if (testingRunning.value[ch.id]) return;
+  testingRunning.value[ch.id] = true;
   testing.value[ch.id] = '测试中…';
-  const r = await testChannel(ch);
-  testing.value[ch.id] = r.message;
-}
-// 【融合版】批量测活:顺序测全部渠道,结果写回各渠道 lastTest(列表里直接看 ✓/✗)
-const batchTesting = ref(false);
-async function testAllChannels() {
-  if (batchTesting.value) return;
-  batchTesting.value = true;
   try {
-    for (const ch of apiSettings.channels) await doTest(ch);
+    const r = await testChannel(ch, {
+      phrase: ch.testPrompt,
+      withJailbreak: !!apiSettings.ui.testWithJailbreak,
+    });
+    testing.value[ch.id] = r.ok
+      ? `✓ 测试通过 (${(r.ms / 1000).toFixed(1)}s)`
+      : `✗ 测试失败 (${(r.ms / 1000).toFixed(1)}s)`;
+    // 若在编辑弹窗草稿上直接测试,同步写回已保存的同 id 渠道
+    const saved = apiSettings.channels.find(x => x.id === ch.id);
+    if (saved && saved !== ch) {
+      saved.testPrompt = ch.testPrompt;
+      saved.lastTest = ch.lastTest ? { ...ch.lastTest } : undefined;
+      if (ch.url) saved.url = ch.url;
+    }
   } finally {
-    batchTesting.value = false;
+    testingRunning.value[ch.id] = false;
   }
 }
+
+function openSingleTest(ch: ApiChannel, topLayer = false) {
+  testModals.value?.openSingle(ch, { topLayer });
+}
+
+function openBatchTest() {
+  testModals.value?.openBatch();
+}
+
 function lastTestMark(ch: ApiChannel): string {
   if (!ch.lastTest) return '';
-  return ch.lastTest.ok ? '✓' : '✗';
+  const sec = typeof ch.lastTest.ms === 'number' ? ` ${(ch.lastTest.ms / 1000).toFixed(1)}s` : '';
+  return ch.lastTest.ok ? `✓${sec}` : '✗';
 }
 
 // 各渠道拉取到的模型列表 + 拉取状态
@@ -405,6 +521,31 @@ function closeVecModelMenuSoon() {
     vecModelMenuOpen.value = null;
     vecModelQuery.value = '';
   }, 150);
+}
+
+const vecTesting = ref<Record<VectorRole, boolean>>({ embedding: false, rerank: false, queryRewrite: false });
+const vecTestResult = ref<Record<VectorRole, { ok: boolean; message: string } | null>>({
+  embedding: null,
+  rerank: null,
+  queryRewrite: null,
+});
+
+async function runVecEndpointTest(role: VectorRole) {
+  if (vecTesting.value[role]) return;
+  vecTesting.value[role] = true;
+  vecTestResult.value[role] = null;
+  try {
+    const res =
+      role === 'embedding'
+        ? await testEmbeddingEndpoint()
+        : role === 'rerank'
+          ? await testRerankEndpoint()
+          : await testQueryRewriteEndpoint();
+    vecTestResult.value[role] = { ok: res.ok, message: res.message };
+    toast(res.message, res.ok ? 'success' : 'error');
+  } finally {
+    vecTesting.value[role] = false;
+  }
 }
 
 /* —— 向量后端类型:'backend' 柏宝库后端 / 'local' 本地降级;探测一次,展示当前在用哪个。 —— */
@@ -930,17 +1071,31 @@ function exportPublicApiDocument() {
             <span class="bbs-field-label">总结使用</span>
             <BbsSelect v-model="apiSettings.assignments.resummary" :options="channelOptions" class="bbs-assign-select" aria-label="总结使用的渠道" />
           </div>
+          <div class="bbs-assign-row">
+            <span class="bbs-field-label">锚点使用</span>
+            <BbsSelect v-model="apiSettings.assignments.anchor" :options="channelOptions" class="bbs-assign-select" aria-label="锚点日记使用的渠道" />
+          </div>
         </div>
-        <p class="bbs-field-hint">推荐使用DeepSeek或豆包，不推荐Gemini，甲太厚</p>
+        <label class="bbs-switch-row">
+          <span class="bbs-field-label">渠道失败自动顺延兜底</span>
+          <input v-model="apiSettings.ui.channelFallback" type="checkbox" class="bbs-checkbox" />
+        </label>
+        <p class="bbs-field-hint">推荐使用DeepSeek或豆包，不推荐Gemini，甲太厚。开启顺延兜底后，主指派渠道请求报错时会自动尝试列表内其他可用渠道。</p>
 
         <hr class="bbs-rule" />
 
-        <!-- 渠道:顶部添加按钮 + 紧凑只读列表(点行进弹窗编辑),不再一长列表单平铺 -->
+        <!-- 渠道:顶部添加按钮 + 紧凑列表(点行进弹窗编辑,右侧可单独自定义测试/复制,顶部可批量自定义测试/导入导出) -->
         <div class="bbs-channel-bar">
           <span class="bbs-field-label">渠道</span>
           <span class="bbs-channel-bar-acts">
-            <button v-if="apiSettings.channels.length" class="bbs-btn bbs-btn-sm" type="button" :disabled="batchTesting" title="依次测试全部渠道" @click="testAllChannels">
-              <Icon name="plug" /> {{ batchTesting ? '测活中…' : '全部测活' }}
+            <button v-if="apiSettings.channels.length" class="bbs-btn bbs-btn-sm" type="button" title="批量自定义测试渠道并查看返回回复" @click="openBatchTest">
+              <Icon name="plug" /> 批量测试
+            </button>
+            <button v-if="apiSettings.channels.length" class="bbs-btn bbs-btn-sm" type="button" title="导出全部渠道为 JSON" @click="openChannelExport">
+              <Icon name="download" /> 导出
+            </button>
+            <button class="bbs-btn bbs-btn-sm" type="button" title="从 JSON 导入渠道" @click="openChannelImport">
+              <Icon name="upload" /> 导入
             </button>
             <button class="bbs-btn bbs-btn-primary bbs-btn-sm" type="button" @click="addChannel('api')">
               <Icon name="plus" /> 添加渠道
@@ -950,11 +1105,26 @@ function exportPublicApiDocument() {
 
         <ul v-if="apiSettings.channels.length" class="bbs-channel-list">
           <li v-for="ch in apiSettings.channels" :key="ch.id" class="bbs-channel-item">
-            <button class="bbs-channel-open" type="button" @click="openChannel(ch.id)">
-              <span class="bbs-channel-item-name">{{ ch.name || '未命名渠道' }}</span>
-              <span v-if="ch.lastTest" class="bbs-channel-item-test" :class="ch.lastTest.ok ? 'bbs-channel-item-test-ok' : 'bbs-channel-item-test-bad'" :title="ch.lastTest.message">{{ lastTestMark(ch) }}</span>
-              <span class="bbs-channel-item-model">{{ ch.model || '未设模型' }}</span>
-            </button>
+            <div class="bbs-channel-item-top">
+              <button class="bbs-channel-open" type="button" @click="openChannel(ch.id)">
+                <span class="bbs-channel-item-name">{{ ch.name || '未命名渠道' }}</span>
+                <span v-if="ch.lastTest" class="bbs-channel-item-test" :class="ch.lastTest.ok ? 'bbs-channel-item-test-ok' : 'bbs-channel-item-test-bad'" :title="ch.lastTest.reply || ch.lastTest.message">{{ lastTestMark(ch) }}</span>
+                <span class="bbs-channel-item-model">{{ ch.model || '未设模型' }}</span>
+              </button>
+              <button class="bbs-btn bbs-btn-sm bbs-channel-test-btn" type="button" title="一键复制此渠道" @click="handleDuplicateChannel(ch.id)">
+                <Icon name="copy" /> 复制
+              </button>
+              <button class="bbs-btn bbs-btn-sm bbs-channel-test-btn" type="button" title="自定义测试此渠道并查看回复" @click="openSingleTest(ch)">
+                <Icon name="plug" /> 自定义测试
+              </button>
+            </div>
+            <div v-if="ch.testPrompt || ch.lastTest" class="bbs-channel-item-meta">
+              <div v-if="ch.testPrompt" class="bbs-channel-item-sub">测试用语：{{ ch.testPrompt }}</div>
+              <div v-if="ch.lastTest" class="bbs-channel-item-sub" :class="ch.lastTest.ok ? 'is-ok' : 'is-bad'">
+                上次测试：{{ ch.lastTest.ok ? '✓ 可用' : '✗ 失败' }}{{ ch.lastTest.ms ? ` · ${(ch.lastTest.ms / 1000).toFixed(1)}s` : '' }} · {{ new Date(ch.lastTest.at).toLocaleString('zh-CN', { hour12: false }) }}
+              </div>
+              <pre v-if="ch.lastTest && (ch.lastTest.reply || ch.lastTest.message)" class="bbs-channel-item-reply">{{ ch.lastTest.ok ? '回复：' : '失败：' }}{{ ch.lastTest.reply || ch.lastTest.message }}</pre>
+            </div>
           </li>
         </ul>
         <p v-else class="bbs-field-hint">还没有渠道。点「添加渠道」配置摘要/总结要用的 API。</p>
@@ -1385,6 +1555,25 @@ function exportPublicApiDocument() {
               使用 Gemini 等模型作为重写模型时,开启这个选项,并把最大 Token 改为 65535。
             </p>
           </template>
+
+          <!-- 向量端点连通性测试 -->
+          <div class="bbs-channel-inline-test-acts" style="margin-top: 8px">
+            <button
+              class="bbs-btn bbs-btn-sm"
+              type="button"
+              :disabled="vecTesting[role.key]"
+              @click="runVecEndpointTest(role.key)"
+            >
+              <Icon name="plug" /> {{ vecTesting[role.key] ? '测试中…' : `测试 ${role.label.split('(')[0].trim()} 连通性` }}
+            </button>
+          </div>
+          <p
+            v-if="vecTestResult[role.key]"
+            class="bbs-field-hint"
+            :style="{ color: vecTestResult[role.key]?.ok ? 'var(--bbs-ok, #3b82f6)' : 'var(--bbs-danger, #dc2626)', fontWeight: 600 }"
+          >
+            {{ vecTestResult[role.key]?.message }}
+          </p>
           </div>
             </div>
           </div>
@@ -1835,26 +2024,62 @@ function exportPublicApiDocument() {
           <span class="bbs-field-hint">这些参数会在发请求前从请求体里删除,用于规避不接受该参数的兼容端点报错。逗号分隔,留空则不排除。</span>
         </label>
         <label class="bbs-modal-field">
-          <span class="bbs-modal-label">测活用语(可选)</span>
-          <input
+          <span class="bbs-modal-label">测试用语(仅此渠道使用,可选)</span>
+          <textarea
             v-model="editingChannel.testPrompt"
             class="bbs-input"
-            type="text"
-            placeholder="留空=「回复 ok」;如:只回答你的模型名"
+            rows="2"
+            maxlength="2000"
+            placeholder="留空则发送默认测试语句（如：你好，请用一句话介绍你自己并说出你的模型名。）"
           />
-          <span class="bbs-field-hint">【百宝月夜书】测试渠道时发送这句话;写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。上次结果:{{ editingChannel.lastTest ? `${editingChannel.lastTest.ok ? '成功' : '失败'} · ${new Date(editingChannel.lastTest.at).toLocaleString()}` : '尚未测过' }}</span>
+          <span class="bbs-field-hint">【百宝月夜书】自定义测试渠道时发送这句话；写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。</span>
         </label>
+        <div class="bbs-channel-inline-test-acts">
+          <button
+            class="bbs-btn bbs-btn-sm"
+            type="button"
+            :disabled="testingRunning[editingChannel.id]"
+            @click="doTest(editingChannel)"
+          >
+            <Icon name="plug" /> {{ testingRunning[editingChannel.id] ? '正在测试…' : '用上面的用语测试' }}
+          </button>
+          <button
+            class="bbs-btn bbs-btn-sm"
+            type="button"
+            :disabled="testingRunning[editingChannel.id]"
+            @click="openSingleTest(editingChannel, true)"
+          >
+            更多测试选项…
+          </button>
+        </div>
         <p v-if="testing[editingChannel.id]" class="bbs-channel-test">{{ testing[editingChannel.id] }}</p>
+        <div
+          v-if="editingChannel.lastTest"
+          class="bbs-channel-reply-card"
+          :class="editingChannel.lastTest.ok ? 'is-ok' : 'is-bad'"
+        >
+          <div class="bbs-channel-reply-head">
+            <strong>
+              {{ editingChannel.lastTest.ok ? '✓ 测试可用' : '✗ 测试失败' }}
+              <template v-if="editingChannel.lastTest.ms"> · {{ (editingChannel.lastTest.ms / 1000).toFixed(1) }}s</template>
+            </strong>
+            <span>{{ new Date(editingChannel.lastTest.at).toLocaleString('zh-CN', { hour12: false }) }}</span>
+          </div>
+          <div v-if="editingChannel.lastTest.prompt" class="bbs-channel-reply-prompt">
+            发送：{{ editingChannel.lastTest.prompt }}
+          </div>
+          <pre class="bbs-channel-reply-body">{{ editingChannel.lastTest.reply || editingChannel.lastTest.message }}</pre>
+        </div>
 
         <footer class="bbs-modal-foot">
           <!-- 删除靠左、与右侧主操作拉开,破坏性动作不与「完成」相邻,降低误触。
-               删除:始终显示文字;测试:PC 显「测试渠道」,移动端只显「测试」(短版,省版面) -->
+               删除:始终显示文字;测试:PC 显「自定义测试」,移动端只显「测试」(短版,省版面) -->
           <button class="bbs-btn bbs-btn-danger" type="button" @click="askRemoveChannel">
             <Icon name="trash" /> 删除
           </button>
           <span class="bbs-modal-foot-spacer"></span>
-          <button class="bbs-btn" type="button" title="测试渠道" @click="doTest(editingChannel)">
-            <Icon name="plug" /> <span class="bbs-btn-label-full">测试渠道</span><span class="bbs-btn-label-short">测试</span>
+          <button class="bbs-btn" type="button" title="自定义测试渠道" @click="openSingleTest(editingChannel, true)">
+            <Icon name="plug" /> <span class="bbs-btn-label-full">自定义测试</span><span class="bbs-btn-label-short">测试</span>
           </button>
           <button class="bbs-btn bbs-btn-primary" type="button" @click="confirmChannel">完成</button>
         </footer>
@@ -1873,6 +2098,73 @@ function exportPublicApiDocument() {
         >
           确定删除渠道「{{ editingChannel.name || '未命名渠道' }}」吗?此操作不可撤销,已指派该渠道的任务会被清空。
         </ConfirmDialog>
+      </div>
+    </ModalMask>
+
+    <!-- ===== 渠道导入/导出弹窗 ===== -->
+    <ModalMask :open="channelIoOpen" @close="channelIoOpen = false">
+      <div v-if="channelIoOpen" class="bbs-modal" role="dialog" aria-modal="true" :aria-label="channelIoMode === 'export' ? '导出渠道 JSON' : '导入渠道 JSON'">
+        <header class="bbs-modal-head">
+          <span class="bbs-modal-title">{{ channelIoMode === 'export' ? '导出副 API 渠道 JSON' : '导入副 API 渠道 JSON' }}</span>
+          <button class="bbs-icon-mini" type="button" title="关闭" @click="channelIoOpen = false"><Icon name="close" /></button>
+        </header>
+
+        <template v-if="channelIoMode === 'export'">
+          <label class="bbs-switch-row">
+            <span class="bbs-modal-label">包含 API 密钥 (key)</span>
+            <input v-model="channelIoIncludeKeys" type="checkbox" class="bbs-checkbox" @change="refreshExportText" />
+          </label>
+          <span class="bbs-field-hint">若用于分享给他人排查配置，建议取消勾选「包含 API 密钥」；若用于自己跨端备份，可保留勾选。</span>
+          <textarea v-model="channelIoText" class="bbs-input" rows="8" readonly style="font-family: ui-monospace, monospace; font-size: 12px" />
+          <footer class="bbs-modal-foot">
+            <button class="bbs-btn" type="button" @click="downloadChannelIoJson">
+              <Icon name="download" /> 下载 JSON 文件
+            </button>
+            <span class="bbs-modal-foot-spacer"></span>
+            <button class="bbs-btn bbs-btn-primary" type="button" @click="copyChannelIoText">
+              <Icon name="copy" /> 复制 JSON
+            </button>
+          </footer>
+        </template>
+
+        <template v-else>
+          <div class="bbs-channel-inline-test-acts" style="margin-bottom: 8px">
+            <button
+              class="bbs-btn bbs-btn-sm"
+              :class="{ 'bbs-btn-primary': channelIoImportMode === 'merge' }"
+              type="button"
+              @click="channelIoImportMode = 'merge'"
+            >
+              合并导入（保留现有渠道）
+            </button>
+            <button
+              class="bbs-btn bbs-btn-sm"
+              :class="{ 'bbs-btn-primary': channelIoImportMode === 'replace' }"
+              type="button"
+              @click="channelIoImportMode = 'replace'"
+            >
+              覆盖导入（替换全部渠道）
+            </button>
+            <button class="bbs-btn bbs-btn-sm" type="button" @click="triggerChannelIoFile">
+              <Icon name="upload" /> 选择 JSON 文件
+            </button>
+            <input ref="channelIoFile" type="file" accept=".json,application/json" hidden @change="onChannelIoFileChange" />
+          </div>
+          <textarea
+            v-model="channelIoText"
+            class="bbs-input"
+            rows="8"
+            placeholder="在此粘贴导出的渠道 JSON，或点击上方「选择 JSON 文件」…"
+            style="font-family: ui-monospace, monospace; font-size: 12px"
+          />
+          <footer class="bbs-modal-foot">
+            <button class="bbs-btn" type="button" @click="channelIoOpen = false">取消</button>
+            <span class="bbs-modal-foot-spacer"></span>
+            <button class="bbs-btn bbs-btn-primary" type="button" :disabled="!channelIoText.trim()" @click="confirmChannelImport">
+              确认导入
+            </button>
+          </footer>
+        </template>
       </div>
     </ModalMask>
 
@@ -2008,6 +2300,9 @@ function exportPublicApiDocument() {
       当前版本 v{{ updateState.current || '—' }},最新版本 v{{ updateState.latest }}。<br />
       现在更新吗?更新完成后会自动刷新页面生效。
     </ConfirmDialog>
+
+    <!-- API 单独 / 批量自定义测试弹窗 -->
+    <ChannelTestModals ref="testModals" />
   </section>
 </template>
 
@@ -2380,8 +2675,100 @@ function exportPublicApiDocument() {
 }
 .bbs-channel-item {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bbs-channel-item-top {
+  display: flex;
   align-items: stretch;
   gap: 8px;
+}
+.bbs-channel-test-btn {
+  flex: 0 0 auto;
+}
+.bbs-channel-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 12px;
+  border-left: 2px solid var(--bbs-line-strong);
+  margin-left: 6px;
+  font-size: 12px;
+}
+.bbs-channel-item-sub {
+  color: var(--bbs-ink-muted);
+  word-break: break-word;
+}
+.bbs-channel-item-sub.is-ok {
+  color: var(--bbs-accent);
+}
+.bbs-channel-item-sub.is-bad {
+  color: var(--bbs-danger, #c0392b);
+}
+.bbs-channel-item-reply {
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--bbs-line);
+  border-radius: var(--bbs-radius-sm);
+  background: var(--bbs-surface);
+  color: var(--bbs-ink);
+  font-family: var(--bbs-font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+  user-select: text;
+}
+.bbs-channel-inline-test-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bbs-channel-reply-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--bbs-line);
+  border-radius: var(--bbs-radius-sm);
+  background: var(--bbs-surface-2);
+  font-size: 12px;
+}
+.bbs-channel-reply-card.is-ok {
+  border-left: 3px solid var(--bbs-accent);
+}
+.bbs-channel-reply-card.is-bad {
+  border-left: 3px solid var(--bbs-danger, #c0392b);
+}
+.bbs-channel-reply-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--bbs-ink-soft);
+}
+.bbs-channel-reply-prompt {
+  color: var(--bbs-ink-muted);
+  word-break: break-word;
+}
+.bbs-channel-reply-body {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--bbs-line);
+  border-radius: var(--bbs-radius-sm);
+  background: var(--bbs-surface);
+  color: var(--bbs-ink);
+  font-family: var(--bbs-font-sans);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+  user-select: text;
 }
 /* 行主体:整块可点,左名字右模型 */
 .bbs-channel-open {

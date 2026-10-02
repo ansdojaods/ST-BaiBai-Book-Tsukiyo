@@ -1,5 +1,6 @@
 import { getContext } from '@/st/context';
-import type { ApiChannel } from './settings';
+import { JAILBREAK_PROMPT } from '@/memory/prompts';
+import { apiSettings, DEFAULT_TEST_PROMPT, type ApiChannel } from './settings';
 
 /**
  * 通过 SillyTavern 的服务端代理调用任意 OpenAI 兼容端点。
@@ -310,48 +311,156 @@ export async function requestViaMainApi(messages: ChatMsg[], _opts: RequestOptio
   return content;
 }
 
+export interface ChannelTestOptions {
+  /** 本次发送的测试用语(不传则取渠道专属 testPrompt → 全局默认 testPrompt) */
+  phrase?: string;
+  /** 是否附带破限提示词(检查破限/预设是否生效,对齐月夜来信小手机) */
+  withJailbreak?: boolean;
+  /** 取消信号 */
+  signal?: AbortSignal;
+}
+
+export interface ChannelTestResult {
+  ok: boolean;
+  /** 耗时(毫秒) */
+  ms: number;
+  /** 模型返回的完整回复文本(失败时为错误信息) */
+  reply: string;
+  /** 本次实际发送的测试用语 */
+  prompt: string;
+  /** 是否附带了破限提示词 */
+  withJailbreak: boolean;
+  /** 简短结论摘要(兼容旧调用方) */
+  message: string;
+}
+
+export interface BatchChannelTestItem extends ChannelTestResult {
+  channelId: string;
+  channelName: string;
+  model: string;
+  url: string;
+}
+
 /**
- * 连通性测试:发一条极短请求。
- * 【融合版】支持渠道专属测活用语(channel.testPrompt,借鉴小手机的「每方案独立测活」),
- * 并把结果写回 channel.lastTest 留存,设置页可直接看到上次测活时间与结论。
+ * 自定义测试(单个渠道):与月夜来信小手机一致,用当前渠道配置的模型发一次测试请求,
+ * 支持渠道专属测试用语、可选附带破限提示词,完整返回模型回复文本并写回 channel.lastTest 留存。
  */
-export async function testChannel(channel: ApiChannel, phrase?: string): Promise<{ ok: boolean; message: string }> {
+export async function testChannel(
+  channel: ApiChannel,
+  phraseOrOpts?: string | ChannelTestOptions,
+): Promise<ChannelTestResult> {
+  const opts: ChannelTestOptions =
+    typeof phraseOrOpts === 'string' ? { phrase: phraseOrOpts } : (phraseOrOpts ?? {});
   const primaryUrl = normalizeUrl(channel.url);
-  const text = (phrase ?? channel.testPrompt ?? '').trim() || '回复"ok"两个字符即可。';
-  const messages: ChatMsg[] = [{ role: 'user', content: text }];
-  const remember = (r: { ok: boolean; message: string }) => {
-    channel.lastTest = { at: Date.now(), ok: r.ok, message: r.message.slice(0, 300) };
-    return r;
+  const text =
+    (opts.phrase ?? channel.testPrompt ?? apiSettings.ui.testPrompt ?? DEFAULT_TEST_PROMPT).trim() ||
+    '请回复 OK。';
+  const withJailbreak = !!opts.withJailbreak;
+  const jailbreakText = (apiSettings.prompts.jailbreak.trim() || JAILBREAK_PROMPT).trim();
+  const sysPrompt = '这是一条用户主动触发的 API 自定义测试请求。请直接、简短地回应用户。';
+  const messages: ChatMsg[] = withJailbreak && jailbreakText
+    ? [
+        { role: 'system', content: jailbreakText },
+        { role: 'system', content: sysPrompt },
+        { role: 'user', content: text },
+      ]
+    : [
+        { role: 'system', content: sysPrompt },
+        { role: 'user', content: text },
+      ];
+
+  const t0 = Date.now();
+  const remember = (ok: boolean, reply: string, message: string): ChannelTestResult => {
+    const ms = Math.max(1, Date.now() - t0);
+    const cleanReply = reply.trim().slice(0, 2000);
+    const cleanMsg = message.slice(0, 300);
+    channel.lastTest = {
+      at: Date.now(),
+      ok,
+      ms,
+      reply: cleanReply,
+      prompt: text,
+      withJailbreak,
+      message: cleanMsg,
+    };
+    return {
+      ok,
+      ms,
+      reply: cleanReply,
+      prompt: text,
+      withJailbreak,
+      message: cleanMsg,
+    };
   };
+
   try {
-    const reply = await requestCompletionAtUrl(channel, messages, primaryUrl);
+    const reply = await requestCompletionAtUrl(channel, messages, primaryUrl, { signal: opts.signal });
     const changed = channel.url.trim().replace(/\/+$/, '') !== primaryUrl;
     if (changed) channel.url = primaryUrl;
-    return remember({
-      ok: true,
-      message: `连通正常${changed ? `,已采用:${primaryUrl}` : ''},返回:${reply.slice(0, 120)}`,
-    });
+    const ms = Math.max(1, Date.now() - t0);
+    return remember(
+      true,
+      reply,
+      `连通正常(${(ms / 1000).toFixed(1)}s)${changed ? `,已采用:${primaryUrl}` : ''},返回:${reply.slice(0, 120)}`,
+    );
   } catch (e) {
     if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 405)) {
-      return remember({ ok: false, message: e instanceof Error ? e.message : String(e) });
+      const errMsg = e instanceof Error ? e.message : String(e);
+      return remember(false, errMsg, errMsg);
     }
 
     const fallbackUrl = alternateUrl(primaryUrl);
     if (!fallbackUrl || fallbackUrl === primaryUrl) {
-      return remember({ ok: false, message: e.message });
+      return remember(false, e.message, e.message);
     }
     try {
-      const reply = await requestCompletionAtUrl(channel, messages, fallbackUrl);
+      const reply = await requestCompletionAtUrl(channel, messages, fallbackUrl, { signal: opts.signal });
       channel.url = fallbackUrl;
-      return remember({
-        ok: true,
-        message: `连通正常,已自动改用:${fallbackUrl},返回:${reply.slice(0, 120)}`,
-      });
+      const ms = Math.max(1, Date.now() - t0);
+      return remember(
+        true,
+        reply,
+        `连通正常(${(ms / 1000).toFixed(1)}s),已自动改用:${fallbackUrl},返回:${reply.slice(0, 120)}`,
+      );
     } catch {
       // 备用地址也失败时保留首个错误,避免把模型名等真实问题掩盖成路径错误。
-      return remember({ ok: false, message: e.message });
+      return remember(false, e.message, e.message);
     }
   }
+}
+
+/**
+ * 批量自定义测试:与月夜来信小手机「批量测活」一致,并发测试所选渠道,
+ * 可选「优先使用各渠道自己的测试用语」与「附带破限提示词」,返回每个渠道的耗时与完整回复。
+ */
+export async function batchTestChannels(
+  channels: ApiChannel[],
+  opts: {
+    phrase?: string;
+    perChannel?: boolean;
+    withJailbreak?: boolean;
+    signal?: AbortSignal;
+  } = {},
+): Promise<BatchChannelTestItem[]> {
+  const unified = (opts.phrase ?? apiSettings.ui.testPrompt ?? DEFAULT_TEST_PROMPT).trim() || '请回复 OK。';
+  const perChannel = opts.perChannel !== false;
+  return Promise.all(
+    channels.map(async ch => {
+      const chosenPhrase = perChannel && ch.testPrompt?.trim() ? ch.testPrompt.trim() : unified;
+      const r = await testChannel(ch, {
+        phrase: chosenPhrase,
+        withJailbreak: opts.withJailbreak,
+        signal: opts.signal,
+      });
+      return {
+        ...r,
+        channelId: ch.id,
+        channelName: ch.name || '未命名渠道',
+        model: ch.model || '未设模型',
+        url: ch.url || '',
+      };
+    }),
+  );
 }
 
 const STATUS_URL = '/api/backends/chat-completions/status';

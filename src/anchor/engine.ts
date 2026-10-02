@@ -12,7 +12,7 @@ import { captureSession, sessionCurrent, captureInput } from '@/st/session';
  */
 import { watch } from 'vue';
 import { getContext, appendChatInput, type STMessage } from '@/st/context';
-import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
+import { apiSettings, engineActiveHere, getChannelForTask, getFallbackChannels } from '@/api/settings';
 import { requestCompletion, requestViaMainApi, mainApiAvailable, type ChatMsg } from '@/api/client';
 import { memory, scheduleLeafFlush } from '@/memory/store';
 import { selectInjectionNodes, renderHistoryNodesWithRelative, refreshInjection } from '@/memory/inject';
@@ -191,11 +191,29 @@ export async function generateAnchorSilently(opts: { recentAiFloors?: number } =
   anchorState.busy = true;
   anchorState.lastError = '';
   try {
-    const channel = getChannelForTask('resummary');
+    const channel = getChannelForTask('anchor') ?? getChannelForTask('resummary');
     let send: (messages: ChatMsg[]) => Promise<string>;
-    if (channel) send = messages => requestCompletion(channel, messages);
-    else if (mainApiAvailable()) send = messages => requestViaMainApi(messages);
-    else throw new Error('未指派副 API 渠道,且当前主 API 不可用');
+    if (channel) {
+      send = async messages => {
+        try {
+          return await requestCompletion(channel, messages);
+        } catch (err) {
+          const backups = getFallbackChannels(channel.id).slice(0, 2);
+          for (const backup of backups) {
+            try {
+              return await requestCompletion(backup, messages);
+            } catch {
+              /* 尝试下一个备选渠道 */
+            }
+          }
+          throw err;
+        }
+      };
+    } else if (mainApiAvailable()) {
+      send = messages => requestViaMainApi(messages);
+    } else {
+      throw new Error('未指派副 API 渠道,且当前主 API 不可用');
+    }
 
     const nodes = selectInjectionNodes(memory.summaries, chat);
     const history = nodes.length ? renderHistoryNodesWithRelative(nodes, latestStoryTime(chat)) : '';

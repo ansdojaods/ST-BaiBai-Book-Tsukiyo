@@ -5,17 +5,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as context from '@/st/context';
 import type { STContext, STMessage } from '@/st/context';
-import { apiSettings, normalize, defaults } from '@/api/settings';
+import {
+  apiSettings,
+  normalize,
+  defaults,
+  duplicateChannel,
+  exportChannelsJson,
+  importChannelsJson,
+  getFallbackChannels,
+  getChannelForTask,
+} from '@/api/settings';
 import { memory, recomputeDerived } from '@/memory/store';
 import { createEmptyMemory } from '@/memory/types';
 import { dueHint, fmtPlans } from '@/memory/prompts';
 import { extractAnchorBlock, harvestAnchorAt, handleAnchorIntercept } from '@/anchor/engine';
 import { addAnchor, anchorState, buildAnchorInjectionText, currentAnchor, loadAnchors, setAnchorExcluded, ANCHOR_META_KEY } from '@/anchor/store';
-import { buildExternalInjectionText, buildExternalSummaryMaterial, externalState, loadExternal, pushExternalNotes, selectExternalNotes } from '@/bridge/external';
+import {
+  buildExternalInjectionText,
+  buildExternalSummaryMaterial,
+  externalState,
+  loadExternal,
+  pushExternalNotes,
+  removeExternalNotes,
+  selectExternalNotes,
+  updateExternalNote,
+} from '@/bridge/external';
 import { loadTrash, trashPush, trashState } from '@/backend/trash';
 import { buildSnapshot, createRestorePoint, loadRestorePoints, restoreFromPoint, restoreState, restoreTrashEntry, parseSnapshot } from '@/backend/restore';
-import { deleteSummary } from '@/memory/apply';
-import { getBrief, listChannels } from '@/bridge/phone';
+import { deleteSummary, deriveMemory } from '@/memory/apply';
+import { createPhoneApi, getBrief, listChannels } from '@/bridge/phone';
 
 function msg(mes: string, is_user = false): STMessage {
   return { name: is_user ? '林舟' : '艾琳', is_user, is_system: false, mes, extra: {} };
@@ -295,5 +313,87 @@ describe('小手机联动 API', () => {
     const chs = listChannels();
     expect(chs[0].hasKey).toBe(true);
     expect(JSON.stringify(chs)).not.toContain('sk-secret');
+    expect(brief.mainNpcs[0]?.name).toBe('艾琳');
+    expect(createPhoneApi().getMainNpcs()[0]?.name).toBe('艾琳');
+  });
+
+  it('支持渠道复制、导入导出、顺延备选渠道与锚点独立指派', () => {
+    apiSettings.channels = [
+      {
+        id: 'c1',
+        name: '主力渠道',
+        url: 'https://api.example.com/v1',
+        key: 'sk-1',
+        model: 'deepseek-chat',
+        temperature: 0.7,
+        maxTokens: 4096,
+        timeoutSec: 120,
+        stream: false,
+        prefill: true,
+        excludeParams: [],
+        reasoningEffort: '',
+        testPrompt: '报出模型名',
+      },
+    ];
+    const copied = duplicateChannel('c1');
+    expect(copied).not.toBeNull();
+    expect(copied!.id).not.toBe('c1');
+    expect(copied!.name).toBe('主力渠道 (副本)');
+    expect(apiSettings.channels).toHaveLength(2);
+
+    copied!.lastTest = { at: 100, ok: true, ms: 200, message: 'ok' };
+    const fallbacks = getFallbackChannels('c1');
+    expect(fallbacks).toHaveLength(1);
+    expect(fallbacks[0].id).toBe(copied!.id);
+
+    apiSettings.assignments.resummary = 'c1';
+    apiSettings.assignments.anchor = '';
+    expect(getChannelForTask('anchor')?.id).toBe('c1');
+    apiSettings.assignments.anchor = copied!.id;
+    expect(getChannelForTask('anchor')?.id).toBe(copied!.id);
+
+    const exportedNoKey = exportChannelsJson(false);
+    expect(exportedNoKey).not.toContain('sk-1');
+    const exportedWithKey = exportChannelsJson(true);
+    expect(exportedWithKey).toContain('sk-1');
+
+    const res = importChannelsJson(exportedWithKey, 'replace');
+    expect(res.total).toBe(2);
+  });
+
+  it('外部记录支持内联编辑与多选批量删除，deriveMemory 支持长对话检查点重放', () => {
+    setup([msg('a')]);
+    pushExternalNotes('tsukiyo-phone', [
+      { id: 'n1', kind: 'phone_heart', title: '艾琳·心迹', text: '旧心声' },
+      { id: 'n2', kind: 'phone_promise', title: '约定', text: '明天一起放学' },
+    ]);
+    const updated = updateExternalNote('n1', { text: '修改后的心声', pinned: true }, 'tsukiyo-phone');
+    expect(updated?.text).toBe('修改后的心声');
+    expect(updated?.pinned).toBe(true);
+    const removed = removeExternalNotes([{ id: 'n2', source: 'tsukiyo-phone' }]);
+    expect(removed).toBe(1);
+    expect(externalState.notes).toHaveLength(1);
+
+    // 构造 32 楼长对话检验 deriveMemory 检查点缓存一致性
+    const longChat: STMessage[] = Array.from({ length: 32 }, (_, idx) => {
+      const m = msg(`floor-${idx}`);
+      m.extra!.bbs_leaf = {
+        id: `leaf-${idx}`,
+        text: `第 ${idx} 楼摘要`,
+        createdAt: idx + 1,
+        swipe: 0,
+        v: 1,
+        delta: {
+          time: `2026/09/13 10:${String(idx).padStart(2, '0')}`,
+          location: idx >= 30 ? '天台' : '教室',
+        },
+      } as never;
+      return m;
+    });
+    const d1 = deriveMemory(longChat);
+    const d2 = deriveMemory(longChat);
+    expect(d1.state.location).toBe('天台');
+    expect(d2.state.location).toBe('天台');
+    expect(d2.state.time).toBe('2026/09/13 10:31');
   });
 });

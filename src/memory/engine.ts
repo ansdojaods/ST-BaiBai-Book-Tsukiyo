@@ -1,7 +1,7 @@
 import { captureSession, sessionCurrent, assertSession, captureInput, StaleTaskError, type SessionTicket } from '@/st/session';
 import type { ChatMsg } from '@/api/client';
 import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
-import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
+import { apiSettings, engineActiveHere, getChannelForTask, getFallbackChannels } from '@/api/settings';
 import type { TaskType } from '@/api/settings';
 import type { STMessage, WorldInfoEntry } from '@/st/context';
 import { getContext, getCheckWorldInfo, getEjsTemplate, setMessageText } from '@/st/context';
@@ -62,6 +62,7 @@ export const batchState = reactive({
   running: false,
   done: 0,
   total: 0,
+  currentRange: '' as string,
   cancelRequested: false, // 用户已点取消、等块边界生效
 });
 
@@ -1060,7 +1061,24 @@ function resolveSender(
   };
   const channel = getChannelForTask(task);
   if (channel) {
-    return { send: guarded(messages => requestCompletion(channel, messages)), label: `渠道「${channel.name}」(${channel.model})` };
+    return {
+      send: guarded(async messages => {
+        try {
+          return await requestCompletion(channel, messages);
+        } catch (err) {
+          const backups = getFallbackChannels(channel.id).slice(0, 2);
+          for (const backup of backups) {
+            try {
+              return await requestCompletion(backup, messages);
+            } catch {
+              /* 尝试下一个备选渠道 */
+            }
+          }
+          throw err;
+        }
+      }),
+      label: `渠道「${channel.name}」(${channel.model})`,
+    };
   }
   if (!mainApiAvailable()) {
     return { error: '未指派副 API 渠道,且当前主 API 不可用(请填好主 API 后重试,或为本任务单独指派渠道)' };
@@ -1564,26 +1582,48 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
   batchState.cancelRequested = false;
   batchState.done = 0;
   batchState.total = total;
+  batchState.currentRange = '';
   let done = 0;
   let cancelled = false;
   try {
     for (const block of batches) {
       if (!sessionCurrent(session)) { cancelled = true; break; }
       if (batchState.cancelRequested) { cancelled = true; break; }
+      batchState.currentRange =
+        block.length === 1 ? `#${block[0] + 1}` : `#${block[0] + 1} ~ #${block[block.length - 1] + 1}`;
       try {
         await summarizeBatchWork(chat, block, sender);
       } catch (e) {
         if (e instanceof StaleTaskError) { cancelled = true; break; }
-        // 整块失败(已含重试)→ 回退:逐楼单独摘。单楼也可能失败(写 lastError),失败楼留作待摘,不中断后续。
-        console.log('[柏宝书] 批量块失败,回退逐楼:', e instanceof Error ? e.message : String(e));
-        for (const f of block) {
+        // 若块较大(>= 4 楼),先尝试拆分为两个子块重试一次,减少长批截断直接退化为逐楼的概率
+        const subBlocks =
+          block.length >= 4
+            ? [block.slice(0, Math.ceil(block.length / 2)), block.slice(Math.ceil(block.length / 2))]
+            : [block];
+        for (const sub of subBlocks) {
           if (!sessionCurrent(session)) { cancelled = true; break; }
-          if (!isAiFloor(chat[f]) || leafValid(chat[f])) continue; // 已被填或非 AI 楼:跳过
-          try {
-            await summarizeFloorWork(chat, f, sender);
-          } catch (e2) {
-            if (e2 instanceof StaleTaskError) { cancelled = true; break; }
-            engineState.lastError = e2 instanceof Error ? e2.message : String(e2);
+          if (batchState.cancelRequested) { cancelled = true; break; }
+          if (subBlocks.length > 1 && sub.length >= 2) {
+            try {
+              batchState.currentRange = `#${sub[0] + 1} ~ #${sub[sub.length - 1] + 1}`;
+              await summarizeBatchWork(chat, sub, sender);
+              continue;
+            } catch (subErr) {
+              if (subErr instanceof StaleTaskError) { cancelled = true; break; }
+            }
+          }
+          // 子块也失败(或原本就是小块)→ 回退:逐楼单独摘。单楼也可能失败(写 lastError),失败楼留作待摘,不中断后续。
+          console.log('[柏宝书] 批量块失败,回退逐楼:', e instanceof Error ? e.message : String(e));
+          for (const f of sub) {
+            if (!sessionCurrent(session)) { cancelled = true; break; }
+            if (!isAiFloor(chat[f]) || leafValid(chat[f])) continue; // 已被填或非 AI 楼:跳过
+            try {
+              batchState.currentRange = `#${f + 1}`;
+              await summarizeFloorWork(chat, f, sender);
+            } catch (e2) {
+              if (e2 instanceof StaleTaskError) { cancelled = true; break; }
+              engineState.lastError = e2 instanceof Error ? e2.message : String(e2);
+            }
           }
         }
       }
@@ -1599,6 +1639,7 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
     busy = false;
     engineState.running = false;
     batchState.running = false;
+    batchState.currentRange = '';
     batchState.cancelRequested = false;
   }
   await afterSummaryHideAndInject(chat, session);

@@ -1,4 +1,4 @@
-/* 月夜来信 · 小手机 v1.6.3（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · 日期/时间字段可直接手输 · 剧情日期/时刻/地点识别增强：支持 世界/环境/场景/scene 等结构与角色卡开场预设 · 每个 API 方案独立的自定义测活按钮与专属测试用语 · 测活结果留存 · 多卡通用版：联系人/地点可由角色卡预置 · 批量测活 / 私聊连发 / 按回复数主动来信 / 跨设备同步 / 自定义提示词 / 正文剧情规划条） · 无字体阴影 / 剧情规划按回复间隔推进 / 月历与整月节日 / 相册网址图片 · 联系人导入与管理 / 记忆世界书双向同步 / 多人生成 / 模块开关 / 点线面剧情规划 / 手机与 iPad 适配 · 原创实现 · 不含用户 API 密钥或聊天存档 */
+/* 月夜来信 · 小手机 v1.6.3（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态/恋爱心迹回写柏宝书【小手机】记录、每楼层恋爱心迹生成与主要配角联动、全模块一键清空与多选删除、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道 · 日期/时间字段可直接手输 · 剧情日期/时刻/地点识别增强：支持 世界/环境/场景/scene 等结构与角色卡开场预设 · 每个 API 方案独立的自定义测活按钮与专属测试用语 · 测活结果留存 · 多卡通用版：联系人/地点可由角色卡预置 · 批量测活 / 私聊连发 / 按回复数主动来信 / 跨设备同步 / 自定义提示词 / 正文剧情规划条） · 无字体阴影 / 剧情规划按回复间隔推进 / 月历与整月节日 / 相册网址图片 · 联系人导入与管理 / 记忆世界书双向同步 / 多人生成 / 模块开关 / 点线面剧情规划 / 手机与 iPad 适配 · 原创实现 · 不含用户 API 密钥或聊天存档 */
 var TSUKIYO_PRESET = /*@@PRESET@@*/null/*@@END@@*/;
 var TsukiyoPhoneBundle = (() => {
   var PRESET = typeof TSUKIYO_PRESET === "object" && TSUKIYO_PRESET && Array.isArray(TSUKIYO_PRESET.contacts) ? TSUKIYO_PRESET : null;
@@ -651,6 +651,24 @@ var TsukiyoPhoneBundle = (() => {
     const enabled = baibaiRuntime.enabled && b.enabled !== false;
     return { enabled, brief: enabled && b.brief !== false, push: enabled && b.push !== false, present: enabled && b.present !== false };
   }
+  function heartPrefs() {
+    let cfg = null;
+    try {
+      cfg = baibaiRuntime.settings();
+    } catch {
+    }
+    const h = cfg && cfg.ui && isObject(cfg.ui.heartTrace) ? cfg.ui.heartTrace : {};
+    const autoMode = ["baibai_main", "present", "pinned"].includes(h.autoMode) ? h.autoMode : "baibai_main";
+    const maxPerFloor = Math.min(4, Math.max(1, Math.trunc(Number(h.maxPerFloor) || 2)));
+    const pinnedIds = Array.isArray(h.pinnedIds) ? h.pinnedIds.filter((x) => typeof x === "string" && x) : [];
+    return {
+      autoEveryFloor: h.autoEveryFloor === true,
+      autoMode,
+      maxPerFloor,
+      pinnedIds,
+      syncToBaibai: h.syncToBaibai !== false
+    };
+  }
   function baibaiInvalidate() {
     baibaiRuntime.cache = null;
     baibaiRuntime.cacheAt = 0;
@@ -719,18 +737,18 @@ var TsukiyoPhoneBundle = (() => {
   function baibaiActorBrief(contact, mainAllowed, { social = false, group = false } = {}) {
     const brief = baibaiBrief();
     if (!brief) return void 0;
-    // 未标注知情人的计划不凭姓名猜权限。公开动态/群聊不加入整份私密摘要。
     const privateAllowed = !!mainAllowed && !social && !group;
-    const npc = (brief.npcs || []).find(n => n.name === contact.name);
-    let profile = npc ? { 姓名: npc.name, 称呼: text(npc.title, 80), 性格: text(npc.personality, 200) } : "（暂无本人资料）";
+    const npc = (brief.npcs || []).find((n) => nameKey(n.name) === nameKey(contact.name));
+    let profile = npc ? { 姓名: npc.name, 称呼: text(npc.title, 80), 性格: text(npc.personality, 200), 关系: text(npc.relation, 100), 好感状态: text(npc.affinityText, 120) } : "（暂无本人资料）";
     if (privateAllowed) {
       try { profile = text(baibaiApi()?.getNpcProfile?.(contact.name) || "", 1200) || profile; } catch {}
     }
     return { 来源: "柏宝书记忆（只读参考，不强制采用，不代表已公开或人人知情）", 剧情时间: baibaiClock(brief), 本人档案: profile,
+      好感与关系: npc ? { 关系: text(npc.relation, 100), 纽带: text(npc.ties, 120), 好感: text(npc.affinityText, 120), 好感备注: privateAllowed ? text(npc.affinityNote, 160) : "" } : void 0,
       相关未了结计划: privateAllowed ? (brief.plans || []).map(baibaiPlanLine).filter(Boolean).slice(0, 6) : [],
       近期剧情摘要: privateAllowed ? baibaiTail(brief.history, 1800) : "（未授权或公开/群聊场景，不读取全局剧情摘要）",
       锚点日记: privateAllowed && brief.anchor ? baibaiTail(brief.anchor.text, 800) : "",
-      本人生活细节: privateAllowed ? (brief.lifeDetails || []).filter(d => d.subject === contact.name).slice(0, 8).map(d => text(d.text, 160)) : [],
+      本人生活细节: privateAllowed ? (brief.lifeDetails || []).filter((d) => nameKey(d.subject) === nameKey(contact.name)).slice(0, 8).map((d) => text(d.text, 160)) : [],
       说明: "摘要是叙事参考，不是本人自动获知的事实。只使用亲历或明确获知的部分；群聊和公开动态不补入私聊秘密。" };
   }
   function baibaiPlanningBrief() {
@@ -739,24 +757,21 @@ var TsukiyoPhoneBundle = (() => {
     return { 来源: "柏宝书记忆·实时只读", 剧情时间: baibaiClock(brief), 地点: text(brief.location, 80),
       在场: (brief.presentNpcs || []).slice(0, 12), 未了结计划: (brief.plans || []).map(baibaiPlanLine).filter(Boolean).slice(0, 8),
       近期剧情摘要: baibaiTail(brief.history, 2400), 锚点日记: brief.anchor ? baibaiTail(brief.anchor.text, 800) : "",
-      人物档案: (brief.npcs || []).slice(0, 12).map(n => ({ 姓名: n.name, 称呼: text(n.title, 80), 关系: text(n.relation, 100), 近况: text(n.condition, 120) })),
-      物品: (brief.items || []).slice(0, 15).map(i => ({ 名称: text(i.name, 80), 数量: i.qty, 所在: text(i.location, 80) })),
-      生活细节: (brief.lifeDetails || []).slice(0, 12).map(d => ({ 主语: text(d.subject, 40), 内容: text(d.text, 160) })),
+      人物档案: (brief.npcs || []).slice(0, 12).map((n) => ({ 姓名: n.name, 称呼: text(n.title, 80), 关系: text(n.relation, 100), 好感: text(n.affinityText, 120), 主要角色: !!n.important, 近况: text(n.condition, 120) })),
+      物品: (brief.items || []).slice(0, 15).map((i) => ({ 名称: text(i.name, 80), 数量: i.qty, 所在: text(i.location, 80) })),
+      生活细节: (brief.lifeDetails || []).slice(0, 12).map((d) => ({ 主语: text(d.subject, 40), 内容: text(d.text, 160) })),
       说明: "可参考而非必须使用；以当前正文为准。计划不等于已发生，摘要不能替代逐字原文证据；不要凭提及姓名推断知情人。" };
   }
-  // 每次生成重新读当前简报；过滤只发生在请求副本，不删除用户手机存档。
   function baibaiFilterInput(data) {
     baibaiInvalidate();
-    if (!baibaiReadEnabled()) data.memories = (data.memories || []).filter(m => !m.bb);
+    if (!baibaiReadEnabled()) data.memories = (data.memories || []).filter((m) => !m.bb);
     return data;
   }
   function baibaiEnrichRequest(module, request) {
     if (!baibaiReadEnabled()) return request;
     const payload = request.payload;
     if (!isObject(payload)) return request;
-    // 聊天/主动来信/朋友圈由 actorContext 按人构建，不能再追加全知简报。
-    // 多人角色日记同样只使用各自角色资料中的参考。
-    if (["planner", "memory", "diary"].includes(module) && !payload.写日记的角色 && !payload.柏宝书) {
+    if (["planner", "memory", "diary"].includes(module) && !payload.写日记的角色 && !payload.心迹角色 && !payload.柏宝书) {
       payload.柏宝书记忆参考 = baibaiPlanningBrief();
     }
     request.system += "\n柏宝书记忆是可选背景，不必强行套用；角色只采用本人已知事实，未执行计划不得写成完成。整理记忆或核对进度时，仍须满足原任务指定的消息ID/正文楼层/逐字引文证据，不能拿简报冒充原文。";
@@ -767,7 +782,7 @@ var TsukiyoPhoneBundle = (() => {
   }
   function baibaiMemoryCandidates(brief, s) {
     const out = [];
-    const mention = (_t) => ["user"]; // 导入副本默认仅玩家可见；知情人须由用户明确设置
+    const mention = (_t) => ["user"];
     for (const p of Array.isArray(brief.plans) ? brief.plans : []) {
       const line = baibaiPlanLine(p);
       if (!line) continue;
@@ -789,10 +804,762 @@ var TsukiyoPhoneBundle = (() => {
     return u;
   }
   var notBaibai = (m) => !m.bb;
+
+  // ===== 恋爱心迹（每楼层角色心声 · 联动百宝月夜书主要配角） =====
+  function baibaiMainNpcsForHeart(s, snap) {
+    const brief = baibaiBrief(null, { maxAge: 1500 });
+    const presentSet = new Set((snap?.present || []).map(nameKey));
+    const rawList = Array.isArray(brief?.mainNpcs) && brief.mainNpcs.length
+      ? brief.mainNpcs
+      : Array.isArray(brief?.npcs)
+        ? [...brief.npcs].sort((a, b) => (Number(!!b.important) - Number(!!a.important)) || (Number(!!b.present) - Number(!!a.present)) || ((b.affinityInner ?? -999) - (a.affinityInner ?? -999)))
+        : [];
+    const seen = new Set();
+    const out = [];
+    for (const n of rawList) {
+      const k = nameKey(n?.name || "");
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      const c = s?.contacts?.find((x) => nameKey(x.name) === k);
+      out.push({
+        name: text(n.name, 40),
+        contactId: c?.id || "",
+        inContacts: !!c,
+        important: !!n.important,
+        present: !!n.present || presentSet.has(k),
+        title: text(n.title, 80),
+        relation: text(n.relation, 100),
+        ties: text(n.ties, 120),
+        personality: text(n.personality, 200),
+        desc: text(n.desc, 260),
+        condition: text(n.condition, 120),
+        location: text(n.location, 80),
+        affinityInner: Number.isFinite(n.affinityInner) ? n.affinityInner : null,
+        affinityOuter: Number.isFinite(n.affinityOuter) ? n.affinityOuter : null,
+        affinityText: text(n.affinityText, 120),
+        affinityNote: text(n.affinityNote, 160)
+      });
+    }
+    return { brief, list: out };
+  }
+  function syncBaibaiMainNpcsToContacts(s, brief = null, { onlyImportantOrPresent = false } = {}) {
+    const b = brief || baibaiBrief(null, { maxAge: 0 });
+    if (!b || !s) return { added: [], updated: 0 };
+    const candidates = Array.isArray(b.mainNpcs) && b.mainNpcs.length ? b.mainNpcs : Array.isArray(b.npcs) ? b.npcs : [];
+    const removedNames = new Set((s.removedContacts || []).map((r) => nameKey(r.name)));
+    const colors = ["rose", "sage", "amber", "blue"];
+    const added = [];
+    let updated = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      const n = candidates[i];
+      const nm = text(n?.name, 40);
+      if (!nm) continue;
+      const isMain = !!n.important || !!n.present || Number.isFinite(n.affinityInner) || !!n.relation;
+      if (onlyImportantOrPresent && !isMain) continue;
+      const k = nameKey(nm);
+      const existing = s.contacts.find((c) => nameKey(c.name) === k);
+      const bioParts = [
+        n.title ? "身份/称呼：" + text(n.title, 80) : "",
+        n.relation ? "与玩家关系：" + text(n.relation, 100) : "",
+        n.ties ? "关系纽带：" + text(n.ties, 120) : "",
+        n.affinityText ? "好感状态：" + text(n.affinityText, 120) : "",
+        n.personality ? "性格：" + text(n.personality, 240) : "",
+        n.desc ? "设定：" + text(n.desc, 400) : ""
+      ].filter(Boolean).join("\n");
+      if (existing) {
+        if (!existing.bio && bioParts) {
+          existing.bio = text(bioParts, 12e3);
+          updated++;
+        }
+        if (n.condition && (!existing.status || existing.status === "最近有自己的事在忙")) {
+          existing.status = text(n.condition, 240);
+          updated++;
+        }
+        continue;
+      }
+      if (removedNames.has(k) || s.contacts.length >= 200) continue;
+      try {
+        const c = addContact(s, {
+          name: nm,
+          bio: bioParts || "百宝月夜书联动角色",
+          status: text(n.condition || n.location || (n.relation ? "关系：" + n.relation : "百宝书主要角色"), 240),
+          recognized: true,
+          reachable: true,
+          color: colors[i % colors.length],
+          source: "manual",
+          allowNarrative: true,
+          proactive: true
+        });
+        added.push(c);
+      } catch {
+      }
+    }
+    return { added, updated };
+  }
+  function collectFloorContext(bridge, snap, requestedFloor) {
+    let raw = [];
+    try {
+      raw = bridge.context()?.chat || [];
+    } catch {
+    }
+    const floors = [];
+    if (Array.isArray(raw) && raw.length) {
+      for (let i = 0; i < raw.length; i++) {
+        const m = raw[i];
+        if (!m || m.is_system || m.extra?.isSmallSys || m.is_user) continue;
+        const clean = cleanNarrative(m.mes ?? m.message ?? "");
+        if (!clean) continue;
+        floors.push({ floor: i, name: m.name || snap?.character?.name || "角色", text: clean });
+      }
+    }
+    if (!floors.length && Array.isArray(snap?.history)) {
+      for (const h of snap.history) {
+        if (h.role === "assistant" && h.text) floors.push({ floor: h.floor, name: h.name || "角色", text: h.text });
+      }
+    }
+    const latestFloor = floors.length ? floors[floors.length - 1].floor : (snap?.floor ?? 0);
+    const targetFloor = Number.isInteger(Number(requestedFloor)) && requestedFloor !== "" && requestedFloor !== null && requestedFloor !== void 0
+      ? Number(requestedFloor)
+      : latestFloor;
+    let targetAi = floors.find((f) => f.floor === targetFloor) || floors[floors.length - 1] || { floor: targetFloor, name: snap?.character?.name || "正文", text: "" };
+    let prevUser = "";
+    if (Array.isArray(raw) && raw.length && targetAi.floor > 0 && targetAi.floor < raw.length) {
+      for (let j = targetAi.floor - 1; j >= Math.max(0, targetAi.floor - 3); j--) {
+        if (raw[j]?.is_user) {
+          prevUser = cleanNarrative(raw[j].mes ?? raw[j].message ?? "");
+          break;
+        }
+      }
+    } else if (Array.isArray(snap?.history)) {
+      const idx = snap.history.findIndex((h) => h.floor === targetAi.floor);
+      if (idx > 0 && snap.history[idx - 1]?.role === "user") prevUser = snap.history[idx - 1].text;
+    }
+    const recentTurns = [];
+    if (Array.isArray(raw) && raw.length) {
+      for (let j = Math.max(0, targetAi.floor - 4); j <= Math.min(raw.length - 1, targetAi.floor); j++) {
+        const m = raw[j];
+        if (!m || m.is_system || m.extra?.isSmallSys) continue;
+        const t = cleanNarrative(m.mes ?? m.message ?? "");
+        if (t) recentTurns.push({ floor: j, role: m.is_user ? "user" : "assistant", name: m.name || (m.is_user ? (snap?.userName || "玩家") : "角色"), text: text(t, 1200) });
+      }
+    } else {
+      for (const h of (snap?.history || []).slice(-4)) recentTurns.push({ floor: h.floor, role: h.role, name: h.name, text: text(h.text, 1200) });
+    }
+    return {
+      floors: floors.slice(-30),
+      targetFloor: targetAi.floor,
+      targetText: text(targetAi.text, 2600),
+      prevUserText: text(prevUser, 900),
+      recentTurns
+    };
+  }
+  function heartTracesFrom(raw, chosen, floor, brief) {
+    const body = parseModelJson(raw, 5e4);
+    const list = Array.isArray(body.traces) ? body.traces : Array.isArray(body.entries) ? body.entries : body.title || body.text ? [body] : [];
+    assert(list.length, "恋爱心迹生成需要 traces 数组");
+    const npcs = brief?.npcs || [];
+    return list.slice(0, 6).map((x) => {
+      assert(isObject(x) && text(x.text, 6e3), "恋爱心迹缺少正文内容");
+      const rawName = text(x.author, 40);
+      const author = chosen.find((a) => a.name === rawName || a.id === rawName || nameKey(a.name) === nameKey(rawName))
+        || (chosen.length === 1 ? chosen[0] : chosen.find((a) => rawName.includes(a.name) || a.name.includes(rawName)));
+      assert(author, "恋爱心迹角色不在所选列表中：" + rawName);
+      const bbNpc = npcs.find((n) => nameKey(n.name) === nameKey(author.name));
+      return {
+        kind: "heart",
+        floor: Number.isInteger(floor) ? floor : 0,
+        author: author.id,
+        authorName: author.name,
+        title: text(x.title || (author.name + "的心迹"), 80),
+        mood: text(x.mood || "心动", 24),
+        heartbeat: text(x.heartbeat || "", 36),
+        stage: text(x.stage || bbNpc?.relation || "", 48),
+        surface: text(x.surface || "", 240),
+        replyToFloor: text(x.replyToFloor || "", 400),
+        text: text(x.text, 6e3),
+        secret: text(x.secret || "", 260),
+        affinitySnap: text(bbNpc?.affinityText || "", 120),
+        followups: []
+      };
+    });
+  }
+  function pickAutoHeartContacts(s, snap) {
+    const hp = heartPrefs();
+    const { brief, list: bbMain } = baibaiMainNpcsForHeart(s, snap);
+    if (brief) syncBaibaiMainNpcsToContacts(s, brief, { onlyImportantOrPresent: true });
+    const available = s.contacts.filter((c) => c.age === null || c.age >= 12);
+    if (!available.length) return [];
+    let picked = [];
+    if (hp.autoMode === "pinned" && hp.pinnedIds.length) {
+      picked = available.filter((c) => hp.pinnedIds.includes(c.id));
+    }
+    if (!picked.length && hp.autoMode === "baibai_main" && bbMain.length) {
+      const mainNames = bbMain.filter((n) => n.important || n.present || n.affinityInner !== null).map((n) => nameKey(n.name));
+      picked = available.filter((c) => mainNames.includes(nameKey(c.name)));
+      picked.sort((a, b) => mainNames.indexOf(nameKey(a.name)) - mainNames.indexOf(nameKey(b.name)));
+    }
+    if (!picked.length) {
+      const pres = new Set((snap?.present || []).map(nameKey));
+      picked = available.filter((c) => pres.has(nameKey(c.name)));
+    }
+    if (!picked.length && bbMain.length) {
+      const anyNames = bbMain.map((n) => nameKey(n.name));
+      picked = available.filter((c) => anyNames.includes(nameKey(c.name)));
+    }
+    if (!picked.length) {
+      const lastFloorText = snap?.history?.at(-1)?.text || "";
+      picked = available.filter((c) => lastFloorText.includes(c.name));
+    }
+    if (!picked.length) picked = available.slice(0, 1);
+    return picked.slice(0, hp.maxPerFloor).map((c) => c.id);
+  }
+  function renderHeartTracePanel(ui) {
+    const s = ui.data, snap = ui.snapshot, hp = heartPrefs();
+    const { brief, list: mainNpcs } = baibaiMainNpcsForHeart(s, snap);
+    const curFloor = Number.isInteger(snap?.floor) ? snap.floor : 0;
+    const pinnedNames = hp.pinnedIds.map((id2) => contactName(s, id2)).filter((n) => n && n !== "未知联系人");
+    return `<div class="card heart-panel">
+      <div class="row-top">
+        <div class="heart-panel-title"><span class="heart-badge-icon">${icon("heart", 15)}</span><b>恋爱心迹 · 每楼层角色心声</b></div>
+        <span>${tag("当前 #" + (curFloor + 1) + " 楼", "rose")} ${brief ? tag("百宝书联动 · " + mainNpcs.length + " 人", "gold") : tag("独立模式")}</span>
+      </div>
+      <p class="tiny muted" style="margin-top:5px">紧贴每一楼层正文互动，剖析角色当下的表面伪装、心底回应、悸动独白与未说出口的小秘密；自动联动百宝月夜书的主要配角、好感度与人物记忆。</p>
+      <div class="buttons" style="margin-top:10px">
+        ${button(icon("heart", 14) + " 一键生成本楼心迹", "quick-heart-baibai", "", "primary")}
+        ${button(icon("spark", 14) + " 选楼层 / 选角色…", "generate-heart-trace")}
+        ${brief ? button(icon("people", 14) + " 同步百宝书主要配角", "heart-sync-baibai") : ""}
+      </div>
+      ${mainNpcs.length ? `<div class="heart-npc-strip"><small class="muted">百宝书主要配角（点名字立即生成 ta 在 #${curFloor + 1} 楼的恋爱心迹）：</small><div class="heart-npc-pills">${mainNpcs.slice(0, 10).map((n) => `<button type="button" class="heart-npc-pill ${n.present ? "is-present" : ""} ${n.important ? "is-main" : ""}" data-action="quick-heart-npc" data-id="${e(n.name)}" title="${e([n.relation, n.affinityText, n.condition].filter(Boolean).join(" · "))}"><b>${e(n.name)}</b>${n.present ? `<i class="pill-tag">在场</i>` : n.important ? `<i class="pill-tag gold">主配</i>` : ""}${n.affinityText ? `<span>${e(n.affinityText.replace(/^内心好感:/, "♥ "))}</span>` : n.relation ? `<span>${e(n.relation)}</span>` : ""}</button>`).join("")}</div></div>` : ""}
+      <div class="divider" style="margin:10px 0 6px"></div>
+      ${switchRow("每楼层回复自动生成恋爱心迹", "酒馆每次生成新楼层后，自动为所选范围的主要配角写下本楼恋爱心迹", "heart-auto-toggle", hp.autoEveryFloor)}
+      <div class="heart-auto-bar">
+        <span class="tiny muted">自动联动对象：</span>
+        <button type="button" class="chip ${hp.autoMode === "baibai_main" ? "active" : ""}" data-action="heart-auto-mode" data-id="baibai_main">百宝书主要配角</button>
+        <button type="button" class="chip ${hp.autoMode === "present" ? "active" : ""}" data-action="heart-auto-mode" data-id="present">当前在场角色</button>
+        <button type="button" class="chip ${hp.autoMode === "pinned" ? "active" : ""}" data-action="heart-auto-mode" data-id="pinned">固定关注${pinnedNames.length ? " (" + pinnedNames.length + ")" : ""}</button>
+        <button type="button" class="chip" data-action="heart-pick-pinned">设置关注 / 人数（每楼≤${hp.maxPerFloor}人）</button>
+      </div>
+    </div>`;
+  }
+  function renderHeartCard(ui, d) {
+    const s = ui.data;
+    const who = !d.author || d.author === "user" ? "我" : contactName(s, d.author) !== "未知联系人" ? contactName(s, d.author) : (d.authorName || "角色");
+    const c = s.contacts.find((x) => x.id === d.author);
+    const floorLabel = Number.isInteger(d.floor) ? "#" + (d.floor + 1) + "楼" : "当层";
+    return `<article class="card heart-card">
+      <div class="row-top">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${avatar(c, "small")}
+          <div>
+            <b style="font-size:13px">${e(who)}</b>
+            <small style="display:block">${e(d.date || new Date(d.ts).toLocaleDateString("zh-CN"))} · ${e(floorLabel)}</small>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+          ${tag("恋爱心迹 · " + floorLabel, "rose")}
+          ${d.mood ? tag(d.mood, "gold") : ""}
+          ${d.heartbeat ? tag("♥ " + d.heartbeat, "rose") : ""}
+        </div>
+      </div>
+      ${d.stage || d.affinitySnap ? `<div class="heart-meta-strip">${d.stage ? `<span>关系心境：<b>${e(d.stage)}</b></span>` : ""}${d.affinitySnap ? `<span>百宝书好感：<b>${e(d.affinitySnap)}</b></span>` : ""}</div>` : ""}
+      <h3 class="heart-title">${e(d.title)}</h3>
+      ${d.surface ? `<div class="heart-box surface"><b>【本楼表面装作】</b><p>${e(d.surface)}</p></div>` : ""}
+      ${d.replyToFloor ? `<div class="heart-box reply"><b>【心底回应 · 致本楼的你】</b><p>${e(d.replyToFloor)}</p></div>` : ""}
+      <div class="heart-body"><p>${e(d.text)}</p></div>
+      ${d.secret ? `<div class="heart-secret"><span>♥ 未说出口的小秘密：</span>${e(d.secret)}</div>` : ""}
+      ${Array.isArray(d.followups) && d.followups.length ? `<div class="heart-followups">${d.followups.map((f) => `<div class="heart-followup-item"><div class="hf-q"><b>你追问/回应：</b>${e(f.q)}</div><div class="hf-a"><b>${e(who)}心底回音${f.mood ? "（" + e(f.mood) + "）" : ""}：</b>${e(f.a)}</div></div>`).join("")}</div>` : ""}
+      <div class="buttons" style="margin-top:10px">
+        ${button(icon("heart", 13) + " 回应 / 追问心迹", "heart-followup", d.id, "primary")}
+        ${button(icon("edit", 13) + " 编辑", "edit-diary", d.id)}
+        ${button(icon("trash", 13) + " 删除", "delete-diary", d.id, "danger")}
+      </div>
+    </article>`;
+  }
+  function renderDiaryEntryCard(ui, d) {
+    if (d.kind === "heart") return renderHeartCard(ui, d);
+    const s = ui.data;
+    const who = !d.author || d.author === "user" ? "我" : contactName(s, d.author) !== "未知联系人" ? contactName(s, d.author) : (d.authorName || "角色");
+    return `<div class="card"><div class="row-top"><div class="eyebrow">${e(who)} · ${e(d.date || "未注明日期")} ${d.mood ? tag(d.mood, "rose") : ""}${d.status === "draft" ? tag("草稿", "gold") : tag("已确认")}</div></div><h3 style="margin-top:8px">${e(d.title)}</h3><p class="muted tiny" style="margin-top:4px;white-space:pre-wrap">${e(d.text.slice(0, 180))}${d.text.length > 180 ? "…" : ""}</p><div class="buttons" style="margin-top:8px">${button(icon("edit", 13) + " 阅读 / 编辑", "edit-diary", d.id)}${button(icon("trash", 13) + " 删除", "delete-diary", d.id, "danger")}</div></div>`;
+  }
+
+  // ===== 全模块通用删除管理栏（多选删除 + 一键清空） =====
+  function tpDeleteBar(moduleKey, count, label = "记录") {
+    if (!count || count <= 0) return "";
+    return `<div class="tp-del-bar"><span class="tp-del-count">共 <b>${count}</b> 条${e(label)}</span><div class="tp-del-actions"><button type="button" class="btn tp-mini-btn" data-action="batch-delete-modal" data-id="${e(moduleKey)}">${icon("check", 12)} 多选删除</button><button type="button" class="btn tp-mini-btn danger" data-action="clear-module" data-id="${e(moduleKey)}">${icon("trash", 12)} 一键清空</button></div></div>`;
+  }
+  function tpModuleMeta(ui, moduleKey) {
+    const s = ui.data;
+    if (!s) return null;
+    if (moduleKey.startsWith("chat:")) {
+      const tid = moduleKey.slice(5);
+      const t = s.threads.find((x) => x.id === tid);
+      if (!t) return null;
+      return {
+        title: `会话「${t.title}」消息`,
+        warn: "仅删除所选的手机聊天消息，不会修改正文楼层。",
+        items: [...t.messages].reverse().map((m) => ({
+          id: m.id,
+          name: (m.role === "user" ? "我" : contactName(s, m.author)) + "：" + text(m.text || "[图片]", 36),
+          note: m.story || time(m.ts)
+        })),
+        remove(d, ids) {
+          const th = d.threads.find((x) => x.id === tid);
+          if (!th) return 0;
+          const before = th.messages.length;
+          th.messages = th.messages.filter((m) => !ids.has(m.id));
+          return before - th.messages.length;
+        },
+        clear(d) {
+          const th = d.threads.find((x) => x.id === tid);
+          if (!th) return 0;
+          const n = th.messages.length;
+          th.messages = [];
+          return n;
+        }
+      };
+    }
+    switch (moduleKey) {
+      case "threads":
+        return {
+          title: "消息会话",
+          warn: "将删除所选会话及其全部聊天记录与关联摘要。",
+          items: [...s.threads].sort((a, b) => (b.messages.at(-1)?.ts || b.createdAt) - (a.messages.at(-1)?.ts || a.createdAt)).map((t) => ({
+            id: t.id,
+            name: t.title + (t.kind === "group" ? "（群聊）" : ""),
+            note: `${t.messages.length} 条消息` + (t.pending.length ? ` · ${t.pending.length} 条待发` : "") + (t.messages.at(-1)?.text ? " · " + text(t.messages.at(-1).text, 30) : "")
+          })),
+          remove(d, ids) {
+            const before = d.threads.length;
+            d.threads = d.threads.filter((t) => !ids.has(t.id));
+            d.summaries = d.summaries.filter((m) => !ids.has(m.threadId));
+            return before - d.threads.length;
+          },
+          clear(d) {
+            const n = d.threads.length;
+            d.threads = [];
+            d.summaries = [];
+            return n;
+          }
+        };
+      case "outbox": {
+        const flat = [];
+        for (const t of s.threads) for (const p of t.pending) flat.push({ id: t.id + "|" + p.id, name: `【${t.title}】` + text(p.text, 42), note: "待发草稿" });
+        return {
+          title: "待发箱消息",
+          warn: "将移除所选的未发送暂存消息。",
+          items: flat,
+          remove(d, ids) {
+            let n = 0;
+            for (const t of d.threads) {
+              const b = t.pending.length;
+              t.pending = t.pending.filter((p) => !ids.has(t.id + "|" + p.id));
+              n += b - t.pending.length;
+            }
+            return n;
+          },
+          clear(d) {
+            let n = 0;
+            for (const t of d.threads) {
+              n += t.pending.length;
+              t.pending = [];
+            }
+            return n;
+          }
+        };
+      }
+      case "contacts":
+        return {
+          title: "通讯录联系人",
+          warn: "将从通讯录移除所选人物，并清理其私聊与引用（角色卡人物可在通讯录底部恢复）。",
+          items: s.contacts.map((c) => ({ id: c.id, name: c.name, note: text(c.status || "", 50) })),
+          remove(d, ids) {
+            let n = 0;
+            for (const cid of ids) {
+              if (d.contacts.some((c) => c.id === cid)) {
+                deleteContact(d, cid);
+                n++;
+              }
+            }
+            return n;
+          },
+          clear(d) {
+            const allIds = d.contacts.map((c) => c.id);
+            for (const cid of allIds) deleteContact(d, cid);
+            return allIds.length;
+          }
+        };
+      case "feed":
+        return {
+          title: "朋友圈动态",
+          warn: "将从手机朋友圈移除所选动态与评论。",
+          items: [...s.feed].reverse().map((p) => ({
+            id: p.id,
+            name: contactName(s, p.author) + "：" + text(p.text, 40),
+            note: (p.story || time(p.ts)) + (p.comments?.length ? ` · ${p.comments.length} 条评论` : "")
+          })),
+          remove(d, ids) {
+            const b = d.feed.length;
+            d.feed = d.feed.filter((p) => !ids.has(p.id));
+            return b - d.feed.length;
+          },
+          clear(d) {
+            const b = d.feed.length;
+            d.feed = [];
+            return b;
+          }
+        };
+      case "diary": {
+        const list = [...s.diary].reverse().filter((d) => d.kind !== "heart");
+        return {
+          title: "角色与玩家日记",
+          warn: "将删除所选日记（不影响恋爱心迹）。",
+          items: list.map((d) => ({
+            id: d.id,
+            name: ((!d.author || d.author === "user") ? "我" : contactName(s, d.author)) + " · " + d.title,
+            note: (d.date || "无日期") + " · " + text(d.text, 36)
+          })),
+          remove(d, ids) {
+            const b = d.diary.length;
+            d.diary = d.diary.filter((x) => !ids.has(x.id));
+            return b - d.diary.length;
+          },
+          clear(d) {
+            const b = d.diary.length;
+            d.diary = d.diary.filter((x) => x.kind === "heart");
+            return b - d.diary.length;
+          }
+        };
+      }
+      case "heart": {
+        const list = [...s.diary].reverse().filter((d) => d.kind === "heart");
+        return {
+          title: "恋爱心迹",
+          warn: "将删除所选楼层的恋爱心迹记录（不影响普通日记）。",
+          items: list.map((d) => ({
+            id: d.id,
+            name: `${contactName(s, d.author) !== "未知联系人" ? contactName(s, d.author) : (d.authorName || "角色")} · #${(d.floor ?? 0) + 1}楼 · ${d.title}`,
+            note: [d.mood, d.heartbeat, text(d.replyToFloor || d.text, 36)].filter(Boolean).join(" · ")
+          })),
+          remove(d, ids) {
+            const b = d.diary.length;
+            d.diary = d.diary.filter((x) => !ids.has(x.id));
+            return b - d.diary.length;
+          },
+          clear(d) {
+            const b = d.diary.length;
+            d.diary = d.diary.filter((x) => x.kind !== "heart");
+            return b - d.diary.length;
+          }
+        };
+      }
+      case "diary_all":
+        return {
+          title: "全部日记与恋爱心迹",
+          warn: "将删除所选的日记与恋爱心迹。",
+          items: [...s.diary].reverse().map((d) => ({
+            id: d.id,
+            name: (d.kind === "heart" ? `[心迹 #${(d.floor ?? 0) + 1}楼] ` : "[日记] ") + ((!d.author || d.author === "user") ? "我" : (contactName(s, d.author) !== "未知联系人" ? contactName(s, d.author) : (d.authorName || "角色"))) + " · " + d.title,
+            note: text(d.text, 40)
+          })),
+          remove(d, ids) {
+            const b = d.diary.length;
+            d.diary = d.diary.filter((x) => !ids.has(x.id));
+            return b - d.diary.length;
+          },
+          clear(d) {
+            const b = d.diary.length;
+            d.diary = [];
+            return b;
+          }
+        };
+      case "notes":
+        return {
+          title: "备忘便签",
+          warn: "将删除所选便签。",
+          items: [...s.notes].reverse().map((n) => ({
+            id: n.id,
+            name: n.title || "无题",
+            note: text(n.text, 45)
+          })),
+          remove(d, ids) {
+            const b = d.notes.length;
+            d.notes = d.notes.filter((n) => !ids.has(n.id));
+            return b - d.notes.length;
+          },
+          clear(d) {
+            const b = d.notes.length;
+            d.notes = [];
+            return b;
+          }
+        };
+      case "memories":
+        return {
+          title: "手机记忆",
+          warn: "将删除所选手机记忆；已同步到记忆世界书的条目也会在下次同步时移除。",
+          items: [...s.memories].reverse().map((m) => ({
+            id: m.id,
+            name: (m.title || KIND_LABEL[m.kind] || "记忆") + (m.bb ? " [柏宝书]" : ""),
+            note: text(m.text, 48)
+          })),
+          remove(d, ids) {
+            const toRemove = d.memories.filter((m) => ids.has(m.id));
+            for (const m of toRemove) {
+              if (d.memoryBook?.linked && m.wb && !d.memoryBook.pendingDelete.includes(m.id) && d.memoryBook.pendingDelete.length < 500) {
+                d.memoryBook.pendingDelete.push(m.id);
+              }
+            }
+            d.memories = d.memories.filter((m) => !ids.has(m.id));
+            return toRemove.length;
+          },
+          clear(d) {
+            const n = d.memories.length;
+            if (d.memoryBook?.linked) {
+              for (const m of d.memories) {
+                if (m.wb && !d.memoryBook.pendingDelete.includes(m.id) && d.memoryBook.pendingDelete.length < 500) {
+                  d.memoryBook.pendingDelete.push(m.id);
+                }
+              }
+            }
+            d.memories = [];
+            d.summaries = [];
+            return n;
+          }
+        };
+      case "agenda":
+        return {
+          title: "日历与约定",
+          warn: "将从手机日历移除所选日程或约定。",
+          items: [...s.agenda].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map((a) => ({
+            id: a.id,
+            name: `${a.date || "未定日"} · ${a.title}`,
+            note: `${a.status} · ${text(a.note || "", 36)}`
+          })),
+          remove(d, ids) {
+            const b = d.agenda.length;
+            d.agenda = d.agenda.filter((a) => !ids.has(a.id));
+            return b - d.agenda.length;
+          },
+          clear(d) {
+            const b = d.agenda.length;
+            d.agenda = [];
+            return b;
+          }
+        };
+      case "tasks":
+        return {
+          title: "生活清单",
+          warn: "将从手机生活清单移除所选条目。",
+          items: s.tasks.map((t) => ({
+            id: t.id,
+            name: t.title,
+            note: `${t.category || "生活"} · ${t.progress || 0}/${t.target || 1}${t.done ? "（已完成）" : ""}`
+          })),
+          remove(d, ids) {
+            const b = d.tasks.length;
+            d.tasks = d.tasks.filter((t) => !ids.has(t.id));
+            return b - d.tasks.length;
+          },
+          clear(d) {
+            const b = d.tasks.length;
+            d.tasks = [];
+            return b;
+          }
+        };
+      case "items":
+        return {
+          title: "随身包手机记录",
+          warn: "将移除所选手机物品附注（不会修改主线角色卡背包变量）。",
+          items: s.items.map((x) => ({
+            id: x.id,
+            name: `${x.title} × ${x.quantity}`,
+            note: text(x.note || "", 45)
+          })),
+          remove(d, ids) {
+            const b = d.items.length;
+            d.items = d.items.filter((x) => !ids.has(x.id));
+            return b - d.items.length;
+          },
+          clear(d) {
+            const b = d.items.length;
+            d.items = [];
+            return b;
+          }
+        };
+      case "album":
+        return {
+          title: "相册照片",
+          warn: "将从手机相册移除所选照片。",
+          items: [...s.album].reverse().map((p) => ({
+            id: p.id,
+            name: p.title || "留影",
+            note: (p.date || new Date(p.ts).toLocaleDateString("zh-CN")) + (p.url ? " · 网络图" : " · 本地图片")
+          })),
+          remove(d, ids) {
+            const b = d.album.length;
+            d.album = d.album.filter((p) => !ids.has(p.id));
+            return b - d.album.length;
+          },
+          clear(d) {
+            const b = d.album.length;
+            d.album = [];
+            return b;
+          }
+        };
+      case "places":
+        return {
+          title: "自建地点",
+          warn: "将移除所选自建地点（内置地图地点不会被删除）。",
+          items: (s.places || []).map((p) => ({
+            id: p.id,
+            name: p.title,
+            note: text(p.note || "", 45)
+          })),
+          remove(d, ids) {
+            const b = d.places.length;
+            d.places = d.places.filter((p) => !ids.has(p.id));
+            return b - d.places.length;
+          },
+          clear(d) {
+            const b = d.places.length;
+            d.places = [];
+            return b;
+          }
+        };
+      case "arc_beats":
+        return {
+          title: "剧情规划 · 面（大纲节点）",
+          warn: "将删除所选大纲节点，并自动校准当前游标。",
+          items: s.arc.outline.beats.map((b, i) => ({
+            id: b.id,
+            name: `${i + 1}. ${b.title}`,
+            note: `${b.time || "阶段"} · ${text(b.scene, 40)}`
+          })),
+          remove(d, ids) {
+            const o = d.arc.outline, b = o.beats.length;
+            o.beats = o.beats.filter((x) => !ids.has(x.id));
+            o.cursor = o.beats.length ? Math.min(o.cursor, o.beats.length - 1) : 0;
+            return b - o.beats.length;
+          },
+          clear(d) {
+            const o = d.arc.outline, b = o.beats.length;
+            o.beats = [];
+            o.cursor = 0;
+            o.judge = { at: 0, verdict: "", note: "" };
+            return b;
+          }
+        };
+      case "arc_lines":
+        return {
+          title: "剧情规划 · 线（事件线）",
+          warn: "将删除所选事件线。",
+          items: s.arc.lines.items.map((l) => ({
+            id: l.id,
+            name: `${l.name} [${l.stage}]`,
+            note: text(l.desc, 42)
+          })),
+          remove(d, ids) {
+            const b = d.arc.lines.items.length;
+            d.arc.lines.items = d.arc.lines.items.filter((x) => !ids.has(x.id));
+            return b - d.arc.lines.items.length;
+          },
+          clear(d) {
+            const b = d.arc.lines.items.length;
+            d.arc.lines.items = [];
+            return b;
+          }
+        };
+      case "arc_points": {
+        const pts = [];
+        for (const day of s.arc.points.days) {
+          for (const ev of day.events) pts.push({ id: ev.id, name: `[Day ${day.n}] ${ev.title}`, note: [ev.date, ev.time, ev.place, text(ev.desc, 30)].filter(Boolean).join(" · ") });
+        }
+        for (const ev of s.arc.points.future) pts.push({ id: ev.id, name: `[远期] ${ev.title}`, note: [ev.date, ev.time, ev.place, text(ev.desc, 30)].filter(Boolean).join(" · ") });
+        for (const ev of s.arc.points.past) pts.push({ id: ev.id, name: `[已过去] ${ev.title}`, note: [ev.date, ev.time, ev.place].filter(Boolean).join(" · ") });
+        return {
+          title: "剧情规划 · 点（日程事件）",
+          warn: "将删除所选日程事件点。",
+          items: pts,
+          remove(d, ids) {
+            let n = 0;
+            for (const day of d.arc.points.days) {
+              const b = day.events.length;
+              day.events = day.events.filter((x) => !ids.has(x.id));
+              n += b - day.events.length;
+            }
+            const bf = d.arc.points.future.length;
+            d.arc.points.future = d.arc.points.future.filter((x) => !ids.has(x.id));
+            n += bf - d.arc.points.future.length;
+            const bp = d.arc.points.past.length;
+            d.arc.points.past = d.arc.points.past.filter((x) => !ids.has(x.id));
+            n += bp - d.arc.points.past.length;
+            return n;
+          },
+          clear(d) {
+            let n = d.arc.points.future.length + d.arc.points.past.length;
+            for (const day of d.arc.points.days) {
+              n += day.events.length;
+              day.events = [];
+            }
+            d.arc.points.future = [];
+            d.arc.points.past = [];
+            return n;
+          }
+        };
+      }
+      case "plans":
+        return {
+          title: "未来方向档案",
+          warn: "将删除所选未来方向。",
+          items: [...s.plans].reverse().map((p) => ({
+            id: p.id,
+            name: p.title,
+            note: `${p.tone || "日常"} · ${p.status} · ${text(p.summary, 36)}`
+          })),
+          remove(d, ids) {
+            const b = d.plans.length;
+            d.plans = d.plans.filter((p) => !ids.has(p.id));
+            if (d.activePlan && ids.has(d.activePlan.id)) d.activePlan = null;
+            return b - d.plans.length;
+          },
+          clear(d) {
+            const b = d.plans.length;
+            d.plans = [];
+            d.activePlan = null;
+            return b;
+          }
+        };
+      case "logs":
+        return {
+          title: "运行记录",
+          warn: "仅清理诊断日志，不影响任何聊天或存档数据。",
+          items: [...(s.logs || [])].reverse().map((l) => ({
+            id: l.id,
+            name: `${MODULES[l.module] || "系统"} · ${new Date(l.ts).toLocaleTimeString("zh-CN")}`,
+            note: text(l.message, 60)
+          })),
+          remove(d, ids) {
+            const b = d.logs.length;
+            d.logs = d.logs.filter((l) => !ids.has(l.id));
+            return b - d.logs.length;
+          },
+          clear(d) {
+            const b = d.logs.length;
+            d.logs = [];
+            return b;
+          }
+        };
+      default:
+        return null;
+    }
+  }
+
   var BaiBaiLink = class {
     constructor(eng) {
       this.eng = eng;
       this.timer = null;
+      this.heartTimer = null;
+      this.heartBusy = false;
+      this.lastHeartAutoKey = "";
       this.offs = [];
       this.busy = false;
       this.lastSig = "";
@@ -811,6 +1578,7 @@ var TsukiyoPhoneBundle = (() => {
       if (brief) {
         if (brief.pluginVersion) parts.push("百宝月夜书 v" + text(brief.pluginVersion, 20));
         if (brief.time) parts.push(text(brief.time, 40));
+        if (Array.isArray(brief.mainNpcs) && brief.mainNpcs.length) parts.push("主要配角 " + brief.mainNpcs.length + " 人");
         parts.push("外部记录 " + (Number(brief.externalCount) || 0) + " 条");
       } else parts.push("简报暂不可用（柏宝书可能关闭了联动）");
       if (this.last.at) parts.push((this.last.ok ? "上次回写成功" : "上次回写失败") + " · " + new Date(this.last.at).toLocaleTimeString("zh-CN", { hour12: false }));
@@ -821,6 +1589,9 @@ var TsukiyoPhoneBundle = (() => {
       this.offs.push(this.eng.repo.on((ev) => {
         if (ev.type === "save") this.schedule(2500);
       }));
+      this.offs.push(this.eng.bridge.listen((kind) => {
+        if (kind === "narrative") this.pokeHeart("narrative");
+      }));
       const win = this.eng.win, handler = (ev) => {
         baibaiInvalidate();
         const d = ev?.detail;
@@ -828,6 +1599,9 @@ var TsukiyoPhoneBundle = (() => {
         clearTimeout(this.eng.debounce);
         this.eng.debounce = setTimeout(() => this.eng.refresh(), 600);
         this.eng.emit("status");
+        if (ev?.type === "st-baibai-book:phone-update" && d && d.type === "memory") {
+          this.pokeHeart("baibai-memory");
+        }
       };
       for (const name of BAIBAI_EVENTS) {
         try {
@@ -840,11 +1614,57 @@ var TsukiyoPhoneBundle = (() => {
     }
     stop() {
       clearTimeout(this.timer);
+      clearTimeout(this.heartTimer);
       for (const off of this.offs) try {
         off();
       } catch {
       }
       this.offs = [];
+    }
+    pokeHeart(reason = "narrative") {
+      if (!heartPrefs().autoEveryFloor) return;
+      clearTimeout(this.heartTimer);
+      this.heartTimer = setTimeout(() => {
+        this.maybeAutoHeartTrace(reason).catch((e2) => {
+          console.warn("[月夜来信] 自动生成恋爱心迹跳过：", e2?.message || e2);
+        });
+      }, reason === "baibai-memory" ? 1200 : 2800);
+    }
+    async maybeAutoHeartTrace(_reason = "narrative") {
+      const hp = heartPrefs();
+      if (!hp.autoEveryFloor || this.heartBusy || this.eng.disposed) return null;
+      if (!this.eng.settings.isEnabled("diary")) return null;
+      if (this.eng.bridge.isBusy?.() || this.eng.runner.active) {
+        this.pokeHeart("retry");
+        return null;
+      }
+      let snap;
+      try {
+        snap = this.eng.bridge.capture();
+      } catch {
+        return null;
+      }
+      const s = this.eng.repo.data;
+      if (!s || !snap || !Number.isInteger(snap.floor) || snap.floor < 0 || !snap.narrativeKey) return null;
+      const autoKey = (snap.owner || "") + "|" + snap.narrativeKey;
+      if (this.lastHeartAutoKey === autoKey || s.automation?.lastHeartKey === autoKey) return null;
+      if (s.diary.some((d) => d.kind === "heart" && d.floor === snap.floor)) {
+        this.lastHeartAutoKey = autoKey;
+        return null;
+      }
+      this.heartBusy = true;
+      try {
+        await this.eng.repo.mutate((d) => {
+          syncBaibaiMainNpcsToContacts(d, null, { onlyImportantOrPresent: true });
+          d.automation.lastHeartKey = autoKey;
+        }, { snapshot: snap, label: "同步百宝书主要配角（恋爱心迹）" }).catch(() => {});
+        const picked = pickAutoHeartContacts(this.eng.repo.data, snap);
+        if (!picked.length) return null;
+        this.lastHeartAutoKey = autoKey;
+        return await this.eng.actions.heartTraces(picked, { floor: snap.floor, background: true });
+      } finally {
+        this.heartBusy = false;
+      }
     }
     schedule(ms) {
       if (!baibaiPrefs().push) return;
@@ -881,6 +1701,27 @@ var TsukiyoPhoneBundle = (() => {
         const status = m.enabled === false ? "已停用" : m.resolved ? "已完成" : "未完约定";
         rows.push({ id: "promise:" + m.id, kind: "phone_promise", title: status, text: "（" + status + "）" + text(m.text, 300) + "（知情：" + m.audience.map(name).join("、") + "）", floor, pinned: active });
       }
+      if (heartPrefs().syncToBaibai !== false && Array.isArray(s.diary)) {
+        for (const d of s.diary.filter((x) => x.kind === "heart").slice(-12)) {
+          const who = d.author && d.author !== "user" ? (name(d.author) !== "未知人物" ? name(d.author) : (d.authorName || "角色")) : me;
+          const fl = Number.isInteger(d.floor) ? d.floor : floor;
+          const summaryParts = [
+            d.mood ? `心情：${text(d.mood, 20)}` : "",
+            d.heartbeat ? `心动：${text(d.heartbeat, 30)}` : "",
+            d.surface ? `表面：${text(d.surface, 100)}` : "",
+            d.replyToFloor ? `心底回应：${text(d.replyToFloor, 140)}` : "",
+            text(d.text, 220)
+          ].filter(Boolean).join(" ｜ ");
+          rows.push({
+            id: "heart:" + d.id,
+            kind: "phone_heart",
+            title: `恋爱心迹 · ${who}（#${(fl ?? 0) + 1}楼）`,
+            text: `${who}在 #${(fl ?? 0) + 1} 楼的恋爱心迹《${text(d.title, 40)}》：${summaryParts}`,
+            time: text(d.date, 20) || void 0,
+            floor: fl
+          });
+        }
+      }
       return rows;
     }
     async push({ force = false } = {}) {
@@ -897,7 +1738,6 @@ var TsukiyoPhoneBundle = (() => {
           for (const n of api.listNotes?.(BAIBAI_SOURCE) || []) existing.set(n.id, n);
         } catch {
         }
-        // 日程/约定是完整状态集合：只有明确消失的事项才写结束标记，绝不清理消息/动态历史窗口。
         const agendaIds = new Set(s.agenda.map((a) => "agenda:" + a.id));
         const promiseIds = new Set(s.memories.filter((m) => m.kind === "promise" && !m.bb).map((m) => "promise:" + m.id));
         for (const prev of existing.values()) {
@@ -3590,6 +4430,92 @@ ${from.bio.trim()}`;
         return rows;
       }, options);
     }
+    heartTraces(authors, options = {}) {
+      return this.perform("diary", (s, snap) => {
+        const chosen = (authors || []).map((a) => s.contacts.find((c) => c.id === a || nameKey(c.name) === nameKey(String(a)))).filter(Boolean);
+        assert(chosen.length, "请至少选择一位要生成恋爱心迹的角色");
+        const fctx = collectFloorContext(this.bridge, snap, options.floor);
+        const brief = baibaiBrief(null, { maxAge: 1500 });
+        const people = chosen.map((c) => {
+          const ctx = actorContext(s, snap, c);
+          const bbNpc = (brief?.npcs || []).find((n) => nameKey(n.name) === nameKey(c.name));
+          const prevHearts = s.diary.filter((d) => d.kind === "heart" && d.author === c.id).slice(-2).map((d) => ({ 楼层: "#" + ((d.floor ?? 0) + 1) + "楼", 心情: d.mood, 心动: d.heartbeat, 摘要: text(d.replyToFloor || d.text, 120) }));
+          return {
+            名字: c.name,
+            年龄: c.age,
+            状态: c.status,
+            人设: text(c.bio || ctx.本人?.人设 || "", 900),
+            柏宝书关系与好感: bbNpc ? { 称呼: text(bbNpc.title, 80), 与玩家关系: text(bbNpc.relation, 100), 纽带: text(bbNpc.ties, 120), 好感状态: text(bbNpc.affinityText, 120), 好感备注: text(bbNpc.affinityNote, 160), 当前近况: text(bbNpc.condition, 120), 在场: !!bbNpc.present } : void 0,
+            柏宝书简报: ctx.柏宝书简报,
+            先前恋爱心迹延续: prevHearts,
+            本人知道的约定与记忆: ctx.相关约定
+          };
+        });
+        const focusHint = text(options.focusHint || "", 200);
+        return {
+          system: rules + '\n你是「恋爱心迹」专属叙事心理师。请紧扣【目标楼层正文】中玩家与角色的互动细节、角色性格设定与【柏宝书关系与好感】，为每位指定角色各写一篇针对该楼层的「恋爱心迹」。\n要求：\n1. 严格贴合角色本人的性格、说话腔调与心理防线（如傲娇嘴硬、温柔克制、天然呆、腹黑占有等），绝不千篇一律。\n2. 必须直接呼应【目标楼层正文】和【本楼层前一条玩家言行】里的具体动作、眼神或话语，写出角色在那一刻最真实的悸动、醋意、纠结或心软。\n3. 即使角色当时未直接开口，也可写ta在场旁观、事后听闻或此刻挂念玩家时的私密心声。' + (focusHint ? '\n4. 本次额外侧重：' + focusHint : '') + '\n只输出严格 JSON：{"traces":[{"author":"角色名","title":"18字内浪漫或微妙的心迹标题","mood":"2到4字情绪词（如：耳根发烫/嘴硬心软/暗自吃味）","heartbeat":"心动指数与变化（如：78% · 心跳漏拍）","stage":"当前情感阶段（如：暧昧拉扯/情根深种/暗恋试探）","surface":"50字内：本楼层里ta表面上装作的样子或外在反应","replyToFloor":"90字内：针对本楼层你的言行，ta在心底对你说却没敢说出口的话（用第二人称“你”）","text":"180—360字：第一人称（“我”）恋爱心迹独白，细腻描写本楼层互动瞬间ta的真实悸动与心事","secret":"55字内：藏在心底的小秘密，或下一次见面想悄悄对你做的小动作"}]}，顺序与给定角色一致。',
+          payload: {
+            剧情时间: storyFor(s, snap),
+            目标楼层编号: "#" + (fctx.targetFloor + 1) + "楼",
+            本楼层前一条玩家言行: fctx.prevUserText || "（无单独前置输入，见目标楼层正文）",
+            目标楼层正文: fctx.targetText,
+            近期上下文楼层: fctx.recentTurns,
+            心迹角色: chosen.map((c) => c.name),
+            角色资料与好感: people
+          },
+          parse: (raw) => heartTracesFrom(raw, chosen, fctx.targetFloor, brief),
+          meta: { floor: fctx.targetFloor },
+          success: "已生成 #" + (fctx.targetFloor + 1) + " 楼的恋爱心迹"
+        };
+      }, (s, rows, snap, meta) => {
+        const date = storyFor(s, snap).date;
+        for (const r of rows) {
+          limitAppend(s.diary, {
+            id: id("heart"),
+            ...r,
+            date,
+            status: "confirmed",
+            ts: Date.now(),
+            source: "恋爱心迹 · #" + ((meta.floor ?? 0) + 1) + "楼"
+          }, 300, "日记");
+        }
+        return rows;
+      }, options);
+    }
+    heartFollowup(diaryId, playerPrompt, options = {}) {
+      return this.perform("diary", (s, snap) => {
+        const d = s.diary.find((x) => x.id === diaryId && x.kind === "heart");
+        assert(d, "恋爱心迹不存在");
+        const c = s.contacts.find((x) => x.id === d.author) || { id: d.author, name: d.authorName || "角色", bio: "" };
+        const ctx = s.contacts.some((x) => x.id === c.id) ? actorContext(s, snap, c) : {};
+        const q = text(playerPrompt, 400);
+        assert(q, "请输入你想回应或追问的内容");
+        return {
+          system: rules + '\n玩家正在回应或追问角色在 #' + ((d.floor ?? 0) + 1) + ' 楼写下的「恋爱心迹」。请以角色本人的第一人称口吻，针对玩家的这句追问/撩拨/互动做出既有表面反应、又有心底真实悸动的回应。只输出 JSON：{"mood":"2到4字当下反应情绪","answer":"80—200字：角色对玩家这句回应的心底回音与反应（第一人称“我”，对玩家称“你”）"}。',
+          payload: {
+            角色: c.name,
+            人设: text(c.bio || "", 700),
+            柏宝书简报: ctx.柏宝书简报,
+            原恋爱心迹: { 楼层: "#" + ((d.floor ?? 0) + 1) + "楼", 标题: d.title, 心情: d.mood, 表面: d.surface, 心底回应: d.replyToFloor, 正文: d.text, 秘密: d.secret },
+            已有互动追问: (d.followups || []).slice(-3),
+            玩家本次追问或动作: q
+          },
+          parse: (raw) => {
+            const body = parseModelJson(raw, 2e4);
+            const ans = text(body.answer || body.reply || body.text, 1e3);
+            assert(ans, "未生成有效的心迹回音");
+            return { q, a: ans, mood: text(body.mood || "", 24), ts: Date.now() };
+          },
+          meta: { diaryId },
+          success: c.name + " 回应了你的心迹追问"
+        };
+      }, (s, item, _snap, meta) => {
+        const target = s.diary.find((x) => x.id === meta.diaryId);
+        assert(target, "恋爱心迹已被移除");
+        target.followups = [...(Array.isArray(target.followups) ? target.followups : []).slice(-9), item];
+        return item;
+      }, options);
+    }
     /** 生活清单：focus.mode = auto（按正文，不限人物）| pick（指定多人）| random（随机 N 人） */
     autoTasks(focus = { mode: "auto" }, options = {}) {
       return this.perform("diary", (s, snap) => {
@@ -4827,7 +5753,7 @@ ${from.bio.trim()}`;
   };
 
   // src/ui/style.css
-  var style_default = '*,*:before,*:after{text-shadow:none!important}:host{all:initial;text-shadow:none!important;-webkit-font-smoothing:antialiased;font-family:Inter,"Noto Sans CJK SC","Microsoft YaHei",system-ui,sans-serif;color:#27392f;position:fixed;right:22px;bottom:20px;z-index:2147483000;--paper:#f8f9f4;--card:#fff;--ink:#27392f;--sub:#839086;--line:#e5e9e0;--accent:#4f7561;--soft:#e8efe7;--gold:#aa8d56;--danger:#af5555;--bubble:#dcebdc;--shadow:0 24px 90px #152e3029;letter-spacing:0}*{box-sizing:border-box}button,input,select,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit;background:none}button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #b59b65;outline-offset:3px}svg{flex-shrink:0;vertical-align:middle}a{color:var(--accent)}p{margin:0;line-height:1.65}h1,h2,h3,h4{margin:0;font-weight:600}small{font-size:11px;color:var(--sub)}.launcher{background:#355846;color:#fff;border:1px solid #d9e4d1a6;box-shadow:0 8px 30px #1e352f30;border-radius:22px;padding:14px 18px;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:550;position:relative}.launcher .badge{position:absolute;right:-4px;top:-4px}.window{color:var(--ink);width:398px;height:min(800px,calc(var(--tp-vh,100vh) - 34px));min-height:min(450px,calc(var(--tp-vh,100vh) - 24px));max-width:calc(100vw - 24px);background:#e5eae2;border:1px solid #e5e9e2;border-radius:46px;padding:8px;box-shadow:var(--shadow);position:relative;isolation:isolate;overflow:visible;transition:opacity .2s,transform .2s}.window[hidden],.launcher[hidden]{display:none!important}.window[data-theme=night]{--paper:#19251f;--card:#24332a;--ink:#e2e9de;--sub:#a4b3a6;--line:#35483b;--accent:#adc6a4;--soft:#304635;--bubble:#3d5945;background:#314037;border-color:#4f5c4f}.screen{height:100%;border-radius:38px;overflow:hidden;background:var(--paper);display:flex;flex-direction:column;position:relative;font-size:13px;line-height:1.5}.statusbar{height:43px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:7px 20px 0;font-size:12px;font-weight:650;position:relative;user-select:none;touch-action:none}.statusbar .time{width:45px}.island{width:88px;height:23px;border-radius:20px;background:#26352b;position:absolute;left:50%;top:9px;transform:translateX(-50%);display:flex;align-items:center;justify-content:flex-end;padding:6px;gap:7px}.island:before{content:"";height:6px;width:23px;border-radius:9px;background:#405246;margin-right:9px}.island:after{content:"";height:7px;width:7px;border-radius:50%;background:#4b6466;box-shadow:inset 0 0 0 2px #34493e}.status-icons{display:flex;gap:5px;align-items:center}.status-icons svg{width:14px;height:14px}.minimize{width:24px;height:24px;border-radius:50%;margin-left:2px;display:grid;place-items:center;color:var(--sub)}.minimize:hover{background:var(--soft)}.topbar{padding:11px 18px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:64px;border-bottom:1px solid var(--line);flex-shrink:0}.topbar.home-topbar{border-bottom:0;padding-bottom:4px}.topbar .brand{font-size:16px;letter-spacing:1px}.topbar .overline{font-size:9px;letter-spacing:2px;color:var(--sub);margin-bottom:2px}.topbar h2{font-size:16px}.topbar .heading{flex:1;min-width:0}.topbar small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}.icon-btn{height:32px;width:32px;display:grid;place-items:center;border-radius:11px;flex-shrink:0}.icon-btn:hover{background:var(--soft)}.main{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#b9c8b366 transparent;position:relative}.main::-webkit-scrollbar{width:4px}.main::-webkit-scrollbar-thumb{background:#b9c8b366;border-radius:5px}.pad{padding:17px}.home-pad{padding:12px 17px 18px}.eyebrow{font-size:10px;text-transform:uppercase;color:var(--sub);letter-spacing:1.5px}.hero{height:165px;border-radius:23px;overflow:hidden;position:relative;background:#c4d7c8;color:#2b4a39;box-shadow:0 6px 22px #3853390b;margin-bottom:14px}.landscape{position:absolute;width:100%;height:100%;inset:0;z-index:0}.hero-copy{position:relative;z-index:1;padding:20px}.hero-date{font-size:10px;letter-spacing:1px;opacity:.8}.hero h1{font-size:23px;line-height:1.5;font-weight:550;letter-spacing:2px;margin:10px 0 9px}.hero p{font-size:11px;opacity:.85}.hero-pill{position:absolute;right:13px;bottom:13px;z-index:1;background:#edf2e6b0;backdrop-filter:blur(8px);border:1px solid #ffffff60;padding:4px 8px;border-radius:20px;font-size:10px;display:flex;align-items:center;gap:4px}.welcome-row{display:flex;align-items:center;gap:10px;margin:6px 0 15px}.avatar{height:43px;width:43px;border-radius:15px;display:grid;place-items:center;flex-shrink:0;font-size:15px;font-weight:600;background:#e3ebdb;color:#4b6550;overflow:hidden;position:relative}.avatar.sage{background:#dce6d7;color:#5c7558}.avatar.amber{background:#f1e3c7;color:#9c7742}.avatar.rose{background:#f2dcdb;color:#a56d72}.avatar.blue{background:#dce7ea;color:#667e8b}.avatar.user{background:var(--accent);color:var(--paper)}.avatar.small{width:32px;height:32px;border-radius:11px;font-size:12px}.avatar.large{width:70px;height:70px;border-radius:25px;font-size:26px}.avatar img{width:100%;height:100%;object-fit:cover}.welcome-copy{flex:1}.welcome-copy b{display:block;font-size:12px;font-weight:550}.welcome-copy span{font-size:10px;color:var(--sub)}.bg-pill{font-size:10px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:20px;padding:5px 8px;color:var(--sub);background:var(--card)}.dot{width:5px;height:5px;border-radius:50%;background:#b4beb1}.dot.live{background:#78a275;box-shadow:0 0 0 3px #89b98612}.apps{display:grid;grid-template-columns:repeat(4,1fr);row-gap:12px;column-gap:8px}.app{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;position:relative}.app-icon{width:51px;height:51px;border-radius:17px;display:grid;place-items:center;background:var(--card);border:1px solid var(--line);color:var(--accent);box-shadow:0 3px 6px #30472805;transition:transform .15s,background .15s}.app:hover .app-icon{transform:translateY(-3px);background:var(--soft)}.app-icon.green{background:#e4edde;border-color:#dce6d6;color:#63845e}.app-icon.rose{background:#f6e9e4;border-color:#ecded9;color:#ac7c6d}.app-icon.sand{background:#f2eddd;border-color:#e9e1c8;color:#a58d56}.app-icon.blue{background:#e4edef;border-color:#dce7e9;color:#64898d}.window[data-theme=night] .app-icon{background:var(--card);border-color:var(--line);color:var(--accent)}.app .badge{position:absolute;top:-3px;right:7px}.badge{min-width:16px;height:16px;padding:0 4px;background:#b67765;color:white;border:2px solid var(--paper);border-radius:20px;font-size:9px;display:inline-flex;justify-content:center;align-items:center;font-weight:600}.home-bottom{display:flex;gap:10px;margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:15px;background:var(--card);align-items:center}.home-bottom .icon-mini{background:var(--soft);color:var(--accent);padding:8px;border-radius:11px}.home-bottom div:nth-child(2){flex:1}.home-bottom b{font-weight:500;font-size:11px;display:block}.home-bottom small{font-size:10px}.dock{height:57px;display:flex;justify-content:space-around;align-items:center;margin:0 17px 2px;border-top:1px solid var(--line);flex-shrink:0}.dock button{width:46px;position:relative;color:var(--sub);height:40px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.dock button.selected{color:var(--accent)}.dock button.selected:after{content:"";height:3px;width:12px;border-radius:3px;background:var(--accent)}.dock .badge{position:absolute;right:1px;top:0}.home-indicator{height:16px;flex-shrink:0;display:flex;justify-content:center;align-items:center}.home-indicator:after{content:"";width:100px;height:4px;background:var(--ink);opacity:.5;border-radius:10px}.list{padding:0 16px}.list-row{display:flex;align-items:center;gap:11px;padding:16px 0;width:100%;text-align:left;border-bottom:1px solid var(--line)}.list-row:last-child{border-bottom:0}.list-row .body{flex:1;min-width:0}.list-row .row-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}.list-row b{font-size:13px;font-weight:550}.list-row p{font-size:11px;color:var(--sub);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;line-height:1.5}.list-row time{font-size:9px;color:var(--sub);white-space:nowrap}.list-row:hover{filter:brightness(.98)}.subnav{display:flex;gap:7px;padding:12px 17px 5px;overflow:auto;flex-shrink:0}.chip{font-size:11px;display:inline-flex;gap:5px;align-items:center;border:1px solid var(--line);background:var(--card);border-radius:20px;padding:6px 11px;white-space:nowrap;color:var(--sub)}.chip.active{background:var(--accent);color:var(--paper);border-color:var(--accent)}.section-label{font-size:10px;letter-spacing:1px;color:var(--sub);margin:18px 0 9px;display:flex;justify-content:space-between;align-items:center}.card{border:1px solid var(--line);background:var(--card);border-radius:17px;padding:15px;margin-bottom:12px;overflow-wrap:anywhere}.card h3{font-size:14px;line-height:1.55;margin-bottom:7px}.card p{font-size:12px}.muted{color:var(--sub)}.tiny{font-size:10px!important}.tag{display:inline-block;font-size:9px;line-height:1.4;padding:3px 7px;border-radius:6px;background:var(--soft);color:var(--accent);margin-right:5px;vertical-align:middle}.tag.gold{background:#f4ebd6;color:#9a834d}.tag.rose{background:#f5e7e4;color:#a77065}.buttons{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.btn{background:var(--soft);color:var(--accent);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:35px}.btn.primary{background:var(--accent);color:var(--paper);border-color:var(--accent)}.btn.danger{color:var(--danger)}.btn.wide{width:100%;margin-top:8px}.btn.ghost{background:transparent}.btn svg{width:15px;height:15px}.empty{text-align:center;padding:38px 18px;color:var(--sub);font-size:12px;line-height:1.8}.empty .empty-icon{display:block;width:60px;height:60px;padding:17px;background:var(--soft);color:var(--accent);border-radius:24px;margin:0 auto 13px}.empty h3{color:var(--ink);font-size:15px;margin:0 0 7px}.hint{padding:10px 12px;border-radius:11px;background:var(--soft);font-size:10px;color:var(--accent);line-height:1.7;margin-bottom:12px}.hint.warning{background:#f3e7d6;color:#a17e4a}.divider{height:1px;background:var(--line);margin:14px 0}.errorbox{color:var(--danger);background:#ba666613;border:1px solid #ba666622;border-radius:10px;padding:10px;font-size:11px;line-height:1.6;overflow-wrap:anywhere}.chat-scroll{padding:15px 13px;display:flex;flex-direction:column;gap:15px;min-height:100%}.chat-meta{text-align:center;font-size:9px;color:var(--sub);margin:3px 0 0}.message{display:flex;gap:8px;max-width:95%;align-items:flex-start}.message.me{align-self:flex-end;flex-direction:row-reverse}.message .message-body{min-width:0;max-width:270px}.message-name{font-size:9px;color:var(--sub);margin-bottom:3px}.bubble{font-size:13px;line-height:1.85;background:var(--card);padding:10px 12px;border-radius:3px 14px 14px 14px;border:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}.me .bubble{background:var(--bubble);border-color:transparent;border-radius:14px 3px 14px 14px}.bubble img{max-width:100%;max-height:200px;border-radius:7px;display:block}.bubble-tools{display:flex;align-items:center;gap:9px;font-size:8px;color:var(--sub);margin-top:4px}.me .bubble-tools{justify-content:flex-end}.bubble-tools button{padding:1px;color:var(--sub)}.bubble-tools svg{width:12px;height:12px}.composer{padding:10px 12px 12px;border-top:1px solid var(--line);background:var(--card);flex-shrink:0}.compose-row{display:flex;align-items:flex-end;gap:7px}.composer textarea{resize:none;min-height:37px;max-height:92px;border:1px solid var(--line);border-radius:12px;background:var(--paper);flex:1;width:0;padding:8px 10px;font-size:12px;line-height:1.5;color:var(--ink)}.composer .send{width:36px;height:36px;background:var(--accent);color:var(--paper);border-radius:12px;display:grid;place-items:center;flex-shrink:0}.compose-tools{display:flex;align-items:center;gap:12px;padding-top:9px}.compose-tools button{font-size:10px;color:var(--sub);display:flex;align-items:center;gap:3px}.compose-tools svg{width:14px;height:14px}.compose-tools .spacer{flex:1}.pending-strip{margin:0 0 8px;padding:7px 9px;border:1px dashed var(--line);border-radius:8px;display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--sub)}.typing{display:flex;gap:4px;align-items:center;padding:8px}.typing i{height:5px;width:5px;border-radius:50%;background:var(--sub);animation:pulse 1.3s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}@keyframes pulse{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:.9;transform:translateY(-3px)}}.feed-header{height:133px;overflow:hidden;position:relative;background:#cedfcf}.feed-header .caption{position:absolute;left:20px;bottom:16px;color:#2e4a36;font-weight:550;font-size:18px;letter-spacing:2px}.post{padding:20px 17px;border-bottom:1px solid var(--line)}.post-head{display:flex;gap:10px;align-items:center}.post-head .meta{flex:1}.post-head b{font-size:12px;color:var(--accent);font-weight:550}.post-head small{display:block;margin-top:3px;font-size:9px}.post-body{margin:11px 0 0 0;font-size:12px;white-space:pre-wrap;line-height:1.85}.post-image{height:140px;border-radius:11px;margin-top:12px;background:#d2dfd4;overflow:hidden;position:relative}.post-image img{width:100%;height:100%;object-fit:cover}.post-image .image-caption{position:absolute;bottom:12px;left:12px;color:#526e5b;font-size:10px;letter-spacing:1.5px}.post-footer{display:flex;justify-content:flex-end;gap:17px;margin-top:12px;font-size:10px;color:var(--sub)}.post-footer .liked{color:#ac796b}.comments{background:var(--soft);padding:9px 11px;margin-top:10px;border-radius:9px;font-size:10px;line-height:1.9}.comments b{color:var(--accent);font-weight:550}.plan-card{position:relative;padding:17px;overflow:hidden}.plan-card:before{content:"";height:100%;width:3px;background:#b4c5a6;position:absolute;left:0;top:0}.plan-card .plan-number{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:9px}.plan-card .plan-title{font-size:19px;letter-spacing:.5px;margin-bottom:8px}.plan-members{display:flex;align-items:center;margin-top:12px;gap:5px;color:var(--sub);font-size:10px}.plan-members .avatar{border:2px solid var(--card);margin-right:-11px}.plan-members span{margin-left:12px}.steps{padding-left:12px}.step{border-left:1px solid var(--line);padding:3px 0 17px 17px;position:relative}.step:last-child{border-left-color:transparent}.step:before{content:"";position:absolute;left:-4px;top:7px;background:var(--line);width:7px;height:7px;border-radius:50%}.step.current:before{background:var(--accent);box-shadow:0 0 0 4px var(--soft)}.step.current h3{color:var(--accent)}.step small{display:block;font-size:9px;margin-bottom:4px}.step h3{font-size:12px}.step p{font-size:11px;color:var(--sub)}.segmented{display:flex;background:var(--soft);padding:4px;border-radius:12px;margin-bottom:15px;gap:4px}.segmented button{flex:1;font-size:11px;padding:7px;border-radius:9px;color:var(--sub)}.segmented button.active{background:var(--card);color:var(--accent);box-shadow:0 2px 5px #1e362609}.mini-stat{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:12px}.mini-stat strong{font-size:21px;font-weight:500;color:var(--accent)}.mini-stat span{font-size:10px;color:var(--sub);line-height:1.7}.calendar-week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:15px 0}.day{display:flex;flex-direction:column;align-items:center;padding:9px 3px;border-radius:12px;gap:5px;font-size:13px;background:var(--card);border:1px solid var(--line)}.day span{font-size:9px;color:var(--sub)}.day.selected{background:var(--accent);color:var(--paper);border-color:var(--accent)}.day.selected span{color:inherit;opacity:.7}.day i{height:3px;width:3px;border-radius:50%;background:currentColor}.task-row{display:flex;gap:10px;padding:11px 0;align-items:center;border-bottom:1px solid var(--line)}.task-row:last-child{border:0}.task-check{width:22px;height:22px;border:1px solid var(--line);border-radius:7px;display:grid;place-items:center;flex-shrink:0}.task-check.done{background:var(--accent);color:var(--paper)}.task-check svg{width:15px}.task-text{flex:1}.task-text b{font-size:12px;font-weight:500;display:block}.task-text small{font-size:9px}.task-row.is-done b{text-decoration:line-through;color:var(--sub)}.progress{height:4px;background:var(--soft);border-radius:4px;overflow:hidden;margin-top:7px}.progress i{display:block;height:100%;background:var(--accent);opacity:.65}.note-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.note-card{padding:14px;background:#f6f1df;border:1px solid #e9e2cc;border-radius:14px;text-align:left;min-height:140px;color:#706349}.note-card:nth-child(3n+2){background:#e9efe3;border-color:#dfe5d7;color:#5e7051}.note-card:nth-child(3n){background:#f2e8e4;border-color:#e7dbd7;color:#95776d}.note-card h3{font-size:12px;margin-bottom:7px}.note-card p{font-size:10px;white-space:pre-wrap;line-height:1.7;max-height:92px;overflow:hidden}.note-card small{font-size:8px;color:inherit;opacity:.6;display:block;margin-top:15px}.photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.photo-card{border:1px solid var(--line);border-radius:13px;padding:7px;background:var(--card);text-align:left}.photo-card .photo{height:130px;background:var(--soft);border-radius:8px;display:grid;place-items:center;overflow:hidden}.photo-card img{width:100%;height:100%;object-fit:cover}.photo-card small{display:block;padding:7px 3px 2px;font-size:10px}.profile-hero{text-align:center;padding:20px 10px}.profile-hero .avatar{margin:0 auto 12px}.profile-hero h2{font-size:19px;margin-bottom:5px}.profile-hero p{font-size:11px;color:var(--sub);max-width:290px;margin:auto}.profile-hero .buttons{justify-content:center}.details{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--card)}.details summary{cursor:pointer;font-size:12px;color:var(--accent)}.details p,.details pre{font-size:11px;white-space:pre-wrap;line-height:1.9;margin-top:10px;word-break:break-word}.form-field{display:block;margin:12px 0;font-size:11px;color:var(--sub)}.form-field>span{display:block;margin-bottom:6px}.field{width:100%;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:10px;padding:10px;font-size:12px;min-height:38px}.field:focus{border-color:var(--accent)}textarea.field{min-height:84px;resize:vertical;line-height:1.7}select.field{appearance:auto;padding-right:6px}.checkbox-label{display:flex;gap:8px;align-items:flex-start;font-size:11px;line-height:1.7;margin:12px 0;color:var(--sub)}.checkbox-label input{accent-color:var(--accent);margin:4px 0 0}.two-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}.form-note{font-size:9px;color:var(--sub);line-height:1.75}.switch-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}.switch-row b{display:block;font-size:12px;font-weight:550}.switch-row small{display:block;font-size:9px;line-height:1.7;margin-top:3px}.switch{height:23px;width:39px;background:#cbd4c7;border-radius:20px;position:relative;flex-shrink:0}.switch:after{content:"";position:absolute;width:17px;height:17px;border-radius:50%;background:white;left:3px;top:3px;box-shadow:0 1px 3px #1232;transition:transform .2s}.switch.on{background:#6f9477}.switch.on:after{transform:translateX(16px)}.setting-link{display:flex;width:100%;align-items:center;text-align:left;gap:11px;padding:14px 0;border-bottom:1px solid var(--line)}.setting-link:last-child{border:0}.setting-link>svg:first-child{color:var(--accent);width:18px}.setting-link span{flex:1;font-size:12px}.setting-link small{font-size:9px;max-width:115px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.setting-link>svg:last-child{color:var(--sub);width:14px}.api-row{padding:12px;border:1px solid var(--line);border-radius:12px;margin:9px 0;background:var(--card)}.api-row .api-title{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}.api-row small{display:block;margin-top:4px;overflow-wrap:anywhere;font-size:9px}.api-row .buttons{margin-top:8px;gap:5px}.api-row .btn{padding:5px 7px;font-size:9px;min-height:28px}.route-row{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}.route-row span{font-size:11px;flex:1}.route-row select{font-size:10px;max-width:175px;padding:7px;min-height:32px}.notice-dock{position:absolute;left:17px;right:17px;top:45px;z-index:30;pointer-events:none}.toast{border:1px solid var(--line);background:var(--card);box-shadow:0 6px 28px #0c231f20;border-radius:17px;padding:13px;display:flex;gap:9px;align-items:flex-start;font-size:11px;line-height:1.7;pointer-events:auto;animation:slide-in .2s}.toast>svg{width:17px;color:var(--accent);margin-top:3px}.toast .toast-body{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}.toast.error{color:var(--danger)}@keyframes slide-in{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}.modal-layer{position:absolute;inset:0;z-index:40;background:#11231972;backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:17px;border-radius:38px}.modal{background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:19px;width:100%;max-height:90%;overflow:auto;box-shadow:0 20px 70px #10201726}.modal h3{font-size:16px;margin-bottom:9px}.modal .copy{font-size:12px;line-height:1.8;white-space:pre-wrap}.modal .buttons{justify-content:flex-end}.modal pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto;font:10px/1.7 ui-monospace,monospace}.modal .checks{max-height:240px;overflow:auto}.busybar{background:var(--soft);color:var(--accent);font-size:10px;display:flex;align-items:center;gap:8px;padding:7px 16px;flex-shrink:0}.busybar .spin{width:10px;height:10px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}.busybar span{flex:1}.busybar button{text-decoration:underline;font-size:10px}@keyframes spin{to{transform:rotate(360deg)}}.offnote{text-align:center;color:var(--sub);font-size:9px;padding:7px 15px;border-top:1px solid var(--line);flex-shrink:0}.log-line{padding:10px 0;border-bottom:1px solid var(--line);font-size:10px;line-height:1.7}.log-line b{font-size:10px;font-weight:550}.log-line.warning{color:var(--danger)}.search-box{display:flex;gap:8px;align-items:center;margin:0 17px 5px;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:8px 10px}.search-box input{border:0;background:none;outline:none;font-size:11px;min-width:0;flex:1;color:var(--ink)}.search-box svg{color:var(--sub);width:15px}.inline-banner{padding:8px 17px;font-size:9px;line-height:1.6;color:var(--sub);border-bottom:1px solid var(--line)}.inline-banner button{color:var(--accent);text-decoration:underline}.native-connector{width:100%;text-align:left;padding:12px;background:var(--soft);border-radius:12px;line-height:1.7}.preview-row{padding:9px 0;border-bottom:1px solid var(--line);font-size:11px;white-space:pre-wrap}.tap-text{color:var(--accent);font-size:10px;padding:4px 0}meter{width:100%;height:6px;accent-color:var(--accent)}.hidden-input{display:none!important}.danger-text{color:var(--danger)}.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.profile-locked{opacity:.5}.weekday-title{font-size:22px;letter-spacing:1px}.notes-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.9}.floating-dot{height:6px;width:6px;border-radius:50%;background:#81a275;display:inline-block;margin-right:5px}:host([data-demo]){position:relative;right:auto;bottom:auto;z-index:1;display:block;width:398px;margin:auto}:host([data-demo]) .window{height:796px;max-height:calc(var(--tp-vh,100vh) - 52px);max-width:398px;width:398px;min-height:600px}:host([data-demo]) .launcher{margin:auto}@media(max-width:520px){:host{right:10px;bottom:10px}.window{width:min(398px,calc(100vw - 20px));height:min(800px,calc(var(--tp-vh,100vh) - 20px));border-radius:36px;padding:6px}.screen{border-radius:30px}.modal-layer{border-radius:30px}.statusbar{padding-top:6px}.island{height:21px;width:78px}.home-pad{padding-top:8px}.hero{height:166px}.hero h1{font-size:22px}.app-icon{width:48px;height:48px}.apps{row-gap:13px}.home-bottom{margin-top:14px}:host([data-demo]){width:min(398px,calc(100vw - 18px))}:host([data-demo]) .window{width:min(398px,calc(100vw - 18px));min-height:590px;max-height:none;height:780px}.launcher{padding:13px;border-radius:19px}}.calendar-month{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:12px 0 14px}.calendar-month .wk{font-size:9px;color:var(--sub);text-align:center;padding:2px 0}.mday{aspect-ratio:1/1.05;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;background:var(--card);border:1px solid var(--line);font-size:12px;padding:0}.mday.blank{visibility:hidden}.mday.today{border-color:var(--gold);font-weight:700}.mday.selected{background:var(--accent);color:var(--paper);border-color:var(--accent)}.mday i{width:5px;height:5px;border-radius:50%;background:transparent}.mday i.has{background:#b67765}.mday i.fest{background:var(--gold)}.mday.selected i.has,.mday.selected i.fest{background:currentColor}.month-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}.month-head b{font-size:18px}.every-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 10px}.every-row span{font-size:11px;color:var(--sub)}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}\n.week-nav{display:flex;gap:6px;margin-top:10px}.day.today b{text-decoration:underline;text-underline-offset:3px}.day i{opacity:0}.day i.has{opacity:1;width:5px;height:5px;background:#b67765}.day.selected i.has{background:currentColor}.map-hero{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);background:var(--card);border-radius:17px;padding:10px 12px;margin-bottom:6px}.map-hero svg{width:100%;height:auto;border-radius:12px;background:#eef3ea}.map-hero b{font-size:13px;display:block}.map-hero small{font-size:10px}.home-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.home-card{border:1px solid #ecded9;background:#f6e9e4;color:#95776d;border-radius:14px;padding:10px 6px;text-align:center}.home-card b{display:block;font-size:12px}.home-card small{font-size:9px;color:inherit;opacity:.75}.card.pick{border-color:var(--gold)}.details.place summary{display:flex;align-items:center;gap:6px}.details.place summary .tag{margin-left:auto}:host([data-compact]) .launcher{padding:11px 14px;border-radius:18px;font-size:13px}:host([data-compact][data-open]) .window{width:100vw!important;max-width:100vw!important;height:var(--tp-vh,100vh)!important;min-height:0!important;border-radius:0;padding:0;border:0;box-shadow:none}:host([data-compact][data-open]) .screen,:host([data-compact][data-open]) .modal-layer{border-radius:0}:host([data-compact][data-open]) .statusbar{padding-top:max(7px,env(safe-area-inset-top))}:host([data-compact][data-open]) .home-indicator{height:max(10px,env(safe-area-inset-bottom))}:host([data-compact][data-open]) .minimize{width:34px;height:34px;background:var(--soft)}\n/* ===== V3.1 布局引擎：只用 left/top/width/height 像素值，绝不使用 bottom/right（酒馆移动端 html 带 transform，bottom 会指向 0 高度的根节点，入口飞出屏幕） ===== */\n:host,:host([data-compact]),:host([data-open]),:host([data-compact][data-open]){position:fixed!important;left:var(--tp-x,0px)!important;top:var(--tp-y,0px)!important;right:auto!important;bottom:auto!important;width:var(--tp-w,auto)!important;height:var(--tp-h,auto)!important;max-width:none!important;-webkit-text-size-adjust:100%;text-size-adjust:100%}\n:host([data-demo]){position:relative!important;left:auto!important;top:auto!important;width:398px!important;height:auto!important;max-width:calc(100vw - 18px)!important}\n.launcher{touch-action:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;cursor:pointer;min-width:44px;min-height:44px;transition:transform .16s,box-shadow .16s}\n.launcher.dragging{cursor:grabbing;transform:scale(1.08);box-shadow:0 16px 36px #1e352f66;transition:none}\n:host([data-mode=phone]) .launcher,:host([data-mode=tablet]) .launcher{width:54px;height:54px;padding:0!important;border-radius:50%!important;justify-content:center;gap:0;box-shadow:0 8px 26px #1e352f55}\n:host([data-mode=phone]) .launcher>span:not(#launcher-count),:host([data-mode=tablet]) .launcher>span:not(#launcher-count){display:none}\n:host([data-mode=phone]) .launcher .badge,:host([data-mode=tablet]) .launcher .badge{right:-2px;top:-2px}\n.window{-webkit-tap-highlight-color:transparent}\n.window:not([hidden]){animation:tp-pop .22s cubic-bezier(.2,.8,.2,1)}\n@keyframes tp-pop{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}\n:host([data-mode=wide][data-open]) .window{max-width:calc(100vw - 12px)}\n:host([data-mode=phone][data-open]) .window{width:100%!important;max-width:none!important;height:100%!important;min-height:0!important;border-radius:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:var(--paper)!important}\n:host([data-mode=phone][data-open]) .screen,:host([data-mode=phone][data-open]) .modal-layer{border-radius:0!important}\n:host([data-mode=phone][data-open]) .island{display:none}\n:host([data-mode=phone][data-open]) .statusbar{height:auto;min-height:38px;padding:max(8px,env(safe-area-inset-top)) 16px 4px}\n:host([data-mode=phone][data-open]) .minimize{width:34px;height:34px;background:var(--soft)}\n:host([data-mode=tablet][data-open]){display:flex!important;align-items:center;justify-content:center;background:rgba(22,34,28,.46)}\n:host([data-mode=tablet][data-open]) .window{flex:none;width:var(--tp-fw,440px)!important;height:var(--tp-fh,860px)!important;max-width:none!important;min-height:0!important}\n:host([data-mode=tablet][data-open]) .minimize{width:32px;height:32px;background:var(--soft)}\n@media(pointer:coarse){.btn,.chip,.app,.setting-link,.dock button,.icon-btn{min-height:40px}.field{font-size:16px}}\n.main{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}\n:host([data-mode=tablet][data-open]) .window{border-radius:46px!important;padding:8px!important;border:1px solid #e5e9e2!important;box-shadow:var(--shadow)!important}\n:host([data-mode=tablet][data-open]) .screen,:host([data-mode=tablet][data-open]) .modal-layer{border-radius:38px!important}\n:host([data-compact]) .screen,:host([data-compact]) .main{touch-action:pan-y}\n\n/* ===== 剧情规划（面·线·点） ===== */\n.arc-title{font-size:24px;margin:5px 0 4px;letter-spacing:1px}\n.arc-auto{margin-bottom:10px}\n.arc-modes,.arc-tabs,.arc-dirs{margin:10px 0}\n.arc-tabs button{font-size:12px;padding-left:4px;padding-right:4px}\n.arc-timeline{position:relative;margin:10px 0 6px}\n.arc-timeline:before{content:"";position:absolute;left:8px;top:12px;bottom:14px;width:2px;background:var(--line)}\n.arc-beat{position:relative;display:flex;gap:10px;padding:2px 0 10px}\n.arc-dot{flex:none;width:18px;height:18px;border-radius:50%;background:var(--card);border:2px solid var(--line);margin-top:6px;position:relative;z-index:1}\n.arc-beat.past .arc-dot{background:var(--accent);border-color:var(--accent)}\n.arc-beat.current .arc-dot{background:var(--gold);border-color:var(--gold);box-shadow:0 0 0 4px #aa8d5630}\n.arc-beat.next .arc-dot{border-color:var(--gold)}\n.arc-beat-body{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:11px 12px}\n.arc-beat.past .arc-beat-body{opacity:.74}\n.arc-beat.current .arc-beat-body{border-color:var(--gold)}\n.arc-beat-body h3{margin:4px 0 4px;font-size:15px}\n.arc-beat-body small{color:var(--sub);font-size:10px}\n.arc-beat-body p{font-size:12px;color:var(--ink)}\n.arc-sub{font-size:11px!important;color:var(--sub)!important;font-style:italic;margin-top:5px}\n.arc-bar{height:6px;border-radius:4px;background:var(--soft);overflow:hidden;margin:8px 0 4px}\n.arc-bar i{display:block;height:100%;background:var(--accent);border-radius:4px}\n.arc-stages{display:flex;gap:4px;margin:8px 0 2px}\n.arc-stages i{flex:1;height:4px;border-radius:2px;background:var(--line)}\n.arc-stages i.on{background:var(--accent)}\n.arc-line.pinned{border-color:var(--gold)}\n.arc-line.ended{opacity:.68}\n.arc-day{margin:12px 0 6px}\n.arc-day-head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}\n.arc-day-head b{font-size:15px}\n.arc-day-head span{font-size:11px;color:var(--sub)}\n.arc-day-head i{margin-left:auto;font-style:normal;font-size:11px;color:var(--sub);display:inline-flex;gap:3px;align-items:center}\n.arc-day-empty{padding:4px 2px}\n.arc-pt.done{opacity:.62}\n.arc-pt.done h3{text-decoration:line-through}\n.arc-inject{margin-top:14px}\n.arc-inject .chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}\n.arc-inject .chip{flex:1}\n\n.arc .row-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}\n.arc .row-top small{color:var(--sub);font-size:10px}\n.arc-auto{padding:0;overflow:hidden}\n.arc-auto>*:not(.arc-auto-head){margin-left:14px;margin-right:14px}\n.arc-auto>.buttons{margin-bottom:14px}\n.arc-auto.folded{margin-bottom:10px}\n.arc-auto-head{display:flex;align-items:center;gap:8px;width:100%;padding:12px 14px;text-align:left;flex-wrap:wrap}\n.arc-auto-head .arc-auto-title{display:inline-flex;align-items:center;gap:6px;color:var(--accent)}\n.arc-auto-head .arc-auto-title b{color:var(--ink);font-size:13px}\n.arc-auto-head .tag{margin:0}\n.arc-auto-head small{flex:1;min-width:120px;color:var(--sub);font-size:10px;text-align:right}\n.arc-fold{display:inline-flex;transition:transform .2s;color:var(--sub)}\n.arc-fold.open{transform:rotate(90deg)}\n.arc-auto:not(.folded)>.hint,.arc-auto:not(.folded)>.switch-row,.arc-auto:not(.folded)>.segmented{margin-top:8px}\n\n/* ===== V3.2：选人窗口 / 世界书导入 / 模块开关 / 记忆世界书卡片 ===== */\n.filter-row[hidden]{display:none!important}\n.pick-tools{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}\n.pick-tools .btn{padding:6px 12px;font-size:12px}\n.pick-filter{margin:4px 0 6px}\n.pick-list{max-height:min(46vh,340px);border:1px solid var(--line);border-radius:12px;padding:2px 12px}\n.pick-list .checkbox-label{margin:8px 0;color:var(--ink);font-size:13px}\n.pick-list .checkbox-label input{margin-top:5px;flex:none}\n.pick-note{display:block;color:var(--sub);font-size:11px;line-height:1.5;margin-top:1px;word-break:break-all}\n.module-row{flex-direction:column;align-items:stretch;gap:8px}\n.module-head{display:flex;align-items:center;gap:10px}\n.module-head>span{flex:1;font-size:13px}\n.module-row.is-off select{opacity:.5}\n.module-row.is-off .module-head>span{color:var(--sub);text-decoration:line-through}\n.book-card{border:1px solid var(--line)}\n.book-card .row-top{align-items:flex-start;gap:8px}\n.book-card h3{margin:0;word-break:break-all}\n.memory-card.is-off{opacity:.62}\n';
+  var style_default = '*,*:before,*:after{text-shadow:none!important}:host{all:initial;text-shadow:none!important;-webkit-font-smoothing:antialiased;font-family:Inter,"Noto Sans CJK SC","Microsoft YaHei",system-ui,sans-serif;color:#27392f;position:fixed;right:22px;bottom:20px;z-index:2147483000;--paper:#f8f9f4;--card:#fff;--ink:#27392f;--sub:#839086;--line:#e5e9e0;--accent:#4f7561;--soft:#e8efe7;--gold:#aa8d56;--danger:#af5555;--bubble:#dcebdc;--shadow:0 24px 90px #152e3029;letter-spacing:0}*{box-sizing:border-box}button,input,select,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit;background:none}button:disabled{opacity:.42;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #b59b65;outline-offset:3px}svg{flex-shrink:0;vertical-align:middle}a{color:var(--accent)}p{margin:0;line-height:1.65}h1,h2,h3,h4{margin:0;font-weight:600}small{font-size:11px;color:var(--sub)}.launcher{background:#355846;color:#fff;border:1px solid #d9e4d1a6;box-shadow:0 8px 30px #1e352f30;border-radius:22px;padding:14px 18px;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:550;position:relative}.launcher .badge{position:absolute;right:-4px;top:-4px}.window{color:var(--ink);width:398px;height:min(800px,calc(var(--tp-vh,100vh) - 34px));min-height:min(450px,calc(var(--tp-vh,100vh) - 24px));max-width:calc(100vw - 24px);background:#e5eae2;border:1px solid #e5e9e2;border-radius:46px;padding:8px;box-shadow:var(--shadow);position:relative;isolation:isolate;overflow:visible;transition:opacity .2s,transform .2s}.window[hidden],.launcher[hidden]{display:none!important}.window[data-theme=night]{--paper:#19251f;--card:#24332a;--ink:#e2e9de;--sub:#a4b3a6;--line:#35483b;--accent:#adc6a4;--soft:#304635;--bubble:#3d5945;background:#314037;border-color:#4f5c4f}.screen{height:100%;border-radius:38px;overflow:hidden;background:var(--paper);display:flex;flex-direction:column;position:relative;font-size:13px;line-height:1.5}.statusbar{height:43px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:7px 20px 0;font-size:12px;font-weight:650;position:relative;user-select:none;touch-action:none}.statusbar .time{width:45px}.island{width:88px;height:23px;border-radius:20px;background:#26352b;position:absolute;left:50%;top:9px;transform:translateX(-50%);display:flex;align-items:center;justify-content:flex-end;padding:6px;gap:7px}.island:before{content:"";height:6px;width:23px;border-radius:9px;background:#405246;margin-right:9px}.island:after{content:"";height:7px;width:7px;border-radius:50%;background:#4b6466;box-shadow:inset 0 0 0 2px #34493e}.status-icons{display:flex;gap:5px;align-items:center}.status-icons svg{width:14px;height:14px}.minimize{width:24px;height:24px;border-radius:50%;margin-left:2px;display:grid;place-items:center;color:var(--sub)}.minimize:hover{background:var(--soft)}.topbar{padding:11px 18px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:64px;border-bottom:1px solid var(--line);flex-shrink:0}.topbar.home-topbar{border-bottom:0;padding-bottom:4px}.topbar .brand{font-size:16px;letter-spacing:1px}.topbar .overline{font-size:9px;letter-spacing:2px;color:var(--sub);margin-bottom:2px}.topbar h2{font-size:16px}.topbar .heading{flex:1;min-width:0}.topbar small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}.icon-btn{height:32px;width:32px;display:grid;place-items:center;border-radius:11px;flex-shrink:0}.icon-btn:hover{background:var(--soft)}.main{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#b9c8b366 transparent;position:relative}.main::-webkit-scrollbar{width:4px}.main::-webkit-scrollbar-thumb{background:#b9c8b366;border-radius:5px}.pad{padding:17px}.home-pad{padding:12px 17px 18px}.eyebrow{font-size:10px;text-transform:uppercase;color:var(--sub);letter-spacing:1.5px}.hero{height:165px;border-radius:23px;overflow:hidden;position:relative;background:#c4d7c8;color:#2b4a39;box-shadow:0 6px 22px #3853390b;margin-bottom:14px}.landscape{position:absolute;width:100%;height:100%;inset:0;z-index:0}.hero-copy{position:relative;z-index:1;padding:20px}.hero-date{font-size:10px;letter-spacing:1px;opacity:.8}.hero h1{font-size:23px;line-height:1.5;font-weight:550;letter-spacing:2px;margin:10px 0 9px}.hero p{font-size:11px;opacity:.85}.hero-pill{position:absolute;right:13px;bottom:13px;z-index:1;background:#edf2e6b0;backdrop-filter:blur(8px);border:1px solid #ffffff60;padding:4px 8px;border-radius:20px;font-size:10px;display:flex;align-items:center;gap:4px}.welcome-row{display:flex;align-items:center;gap:10px;margin:6px 0 15px}.avatar{height:43px;width:43px;border-radius:15px;display:grid;place-items:center;flex-shrink:0;font-size:15px;font-weight:600;background:#e3ebdb;color:#4b6550;overflow:hidden;position:relative}.avatar.sage{background:#dce6d7;color:#5c7558}.avatar.amber{background:#f1e3c7;color:#9c7742}.avatar.rose{background:#f2dcdb;color:#a56d72}.avatar.blue{background:#dce7ea;color:#667e8b}.avatar.user{background:var(--accent);color:var(--paper)}.avatar.small{width:32px;height:32px;border-radius:11px;font-size:12px}.avatar.large{width:70px;height:70px;border-radius:25px;font-size:26px}.avatar img{width:100%;height:100%;object-fit:cover}.welcome-copy{flex:1}.welcome-copy b{display:block;font-size:12px;font-weight:550}.welcome-copy span{font-size:10px;color:var(--sub)}.bg-pill{font-size:10px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:20px;padding:5px 8px;color:var(--sub);background:var(--card)}.dot{width:5px;height:5px;border-radius:50%;background:#b4beb1}.dot.live{background:#78a275;box-shadow:0 0 0 3px #89b98612}.apps{display:grid;grid-template-columns:repeat(4,1fr);row-gap:12px;column-gap:8px}.app{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;position:relative}.app-icon{width:51px;height:51px;border-radius:17px;display:grid;place-items:center;background:var(--card);border:1px solid var(--line);color:var(--accent);box-shadow:0 3px 6px #30472805;transition:transform .15s,background .15s}.app:hover .app-icon{transform:translateY(-3px);background:var(--soft)}.app-icon.green{background:#e4edde;border-color:#dce6d6;color:#63845e}.app-icon.rose{background:#f6e9e4;border-color:#ecded9;color:#ac7c6d}.app-icon.sand{background:#f2eddd;border-color:#e9e1c8;color:#a58d56}.app-icon.blue{background:#e4edef;border-color:#dce7e9;color:#64898d}.window[data-theme=night] .app-icon{background:var(--card);border-color:var(--line);color:var(--accent)}.app .badge{position:absolute;top:-3px;right:7px}.badge{min-width:16px;height:16px;padding:0 4px;background:#b67765;color:white;border:2px solid var(--paper);border-radius:20px;font-size:9px;display:inline-flex;justify-content:center;align-items:center;font-weight:600}.home-bottom{display:flex;gap:10px;margin-top:12px;padding:10px;border:1px solid var(--line);border-radius:15px;background:var(--card);align-items:center}.home-bottom .icon-mini{background:var(--soft);color:var(--accent);padding:8px;border-radius:11px}.home-bottom div:nth-child(2){flex:1}.home-bottom b{font-weight:500;font-size:11px;display:block}.home-bottom small{font-size:10px}.dock{height:57px;display:flex;justify-content:space-around;align-items:center;margin:0 17px 2px;border-top:1px solid var(--line);flex-shrink:0}.dock button{width:46px;position:relative;color:var(--sub);height:40px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.dock button.selected{color:var(--accent)}.dock button.selected:after{content:"";height:3px;width:12px;border-radius:3px;background:var(--accent)}.dock .badge{position:absolute;right:1px;top:0}.home-indicator{height:16px;flex-shrink:0;display:flex;justify-content:center;align-items:center}.home-indicator:after{content:"";width:100px;height:4px;background:var(--ink);opacity:.5;border-radius:10px}.list{padding:0 16px}.list-row{display:flex;align-items:center;gap:11px;padding:16px 0;width:100%;text-align:left;border-bottom:1px solid var(--line)}.list-row:last-child{border-bottom:0}.list-row .body{flex:1;min-width:0}.list-row .row-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}.list-row b{font-size:13px;font-weight:550}.list-row p{font-size:11px;color:var(--sub);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;line-height:1.5}.list-row time{font-size:9px;color:var(--sub);white-space:nowrap}.list-row:hover{filter:brightness(.98)}.subnav{display:flex;gap:7px;padding:12px 17px 5px;overflow:auto;flex-shrink:0}.chip{font-size:11px;display:inline-flex;gap:5px;align-items:center;border:1px solid var(--line);background:var(--card);border-radius:20px;padding:6px 11px;white-space:nowrap;color:var(--sub)}.chip.active{background:var(--accent);color:var(--paper);border-color:var(--accent)}.section-label{font-size:10px;letter-spacing:1px;color:var(--sub);margin:18px 0 9px;display:flex;justify-content:space-between;align-items:center}.card{border:1px solid var(--line);background:var(--card);border-radius:17px;padding:15px;margin-bottom:12px;overflow-wrap:anywhere}.card h3{font-size:14px;line-height:1.55;margin-bottom:7px}.card p{font-size:12px}.muted{color:var(--sub)}.tiny{font-size:10px!important}.tag{display:inline-block;font-size:9px;line-height:1.4;padding:3px 7px;border-radius:6px;background:var(--soft);color:var(--accent);margin-right:5px;vertical-align:middle}.tag.gold{background:#f4ebd6;color:#9a834d}.tag.rose{background:#f5e7e4;color:#a77065}.buttons{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.btn{background:var(--soft);color:var(--accent);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:11px;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:35px}.btn.primary{background:var(--accent);color:var(--paper);border-color:var(--accent)}.btn.danger{color:var(--danger)}.btn.wide{width:100%;margin-top:8px}.btn.ghost{background:transparent}.btn svg{width:15px;height:15px}.empty{text-align:center;padding:38px 18px;color:var(--sub);font-size:12px;line-height:1.8}.empty .empty-icon{display:block;width:60px;height:60px;padding:17px;background:var(--soft);color:var(--accent);border-radius:24px;margin:0 auto 13px}.empty h3{color:var(--ink);font-size:15px;margin:0 0 7px}.hint{padding:10px 12px;border-radius:11px;background:var(--soft);font-size:10px;color:var(--accent);line-height:1.7;margin-bottom:12px}.hint.warning{background:#f3e7d6;color:#a17e4a}.divider{height:1px;background:var(--line);margin:14px 0}.errorbox{color:var(--danger);background:#ba666613;border:1px solid #ba666622;border-radius:10px;padding:10px;font-size:11px;line-height:1.6;overflow-wrap:anywhere}.chat-scroll{padding:15px 13px;display:flex;flex-direction:column;gap:15px;min-height:100%}.chat-meta{text-align:center;font-size:9px;color:var(--sub);margin:3px 0 0}.message{display:flex;gap:8px;max-width:95%;align-items:flex-start}.message.me{align-self:flex-end;flex-direction:row-reverse}.message .message-body{min-width:0;max-width:270px}.message-name{font-size:9px;color:var(--sub);margin-bottom:3px}.bubble{font-size:13px;line-height:1.85;background:var(--card);padding:10px 12px;border-radius:3px 14px 14px 14px;border:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}.me .bubble{background:var(--bubble);border-color:transparent;border-radius:14px 3px 14px 14px}.bubble img{max-width:100%;max-height:200px;border-radius:7px;display:block}.bubble-tools{display:flex;align-items:center;gap:9px;font-size:8px;color:var(--sub);margin-top:4px}.me .bubble-tools{justify-content:flex-end}.bubble-tools button{padding:1px;color:var(--sub)}.bubble-tools svg{width:12px;height:12px}.composer{padding:10px 12px 12px;border-top:1px solid var(--line);background:var(--card);flex-shrink:0}.compose-row{display:flex;align-items:flex-end;gap:7px}.composer textarea{resize:none;min-height:37px;max-height:92px;border:1px solid var(--line);border-radius:12px;background:var(--paper);flex:1;width:0;padding:8px 10px;font-size:12px;line-height:1.5;color:var(--ink)}.composer .send{width:36px;height:36px;background:var(--accent);color:var(--paper);border-radius:12px;display:grid;place-items:center;flex-shrink:0}.compose-tools{display:flex;align-items:center;gap:12px;padding-top:9px}.compose-tools button{font-size:10px;color:var(--sub);display:flex;align-items:center;gap:3px}.compose-tools svg{width:14px;height:14px}.compose-tools .spacer{flex:1}.pending-strip{margin:0 0 8px;padding:7px 9px;border:1px dashed var(--line);border-radius:8px;display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--sub)}.typing{display:flex;gap:4px;align-items:center;padding:8px}.typing i{height:5px;width:5px;border-radius:50%;background:var(--sub);animation:pulse 1.3s infinite}.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}@keyframes pulse{0%,100%{opacity:.3;transform:translateY(0)}50%{opacity:.9;transform:translateY(-3px)}}.feed-header{height:133px;overflow:hidden;position:relative;background:#cedfcf}.feed-header .caption{position:absolute;left:20px;bottom:16px;color:#2e4a36;font-weight:550;font-size:18px;letter-spacing:2px}.post{padding:20px 17px;border-bottom:1px solid var(--line)}.post-head{display:flex;gap:10px;align-items:center}.post-head .meta{flex:1}.post-head b{font-size:12px;color:var(--accent);font-weight:550}.post-head small{display:block;margin-top:3px;font-size:9px}.post-body{margin:11px 0 0 0;font-size:12px;white-space:pre-wrap;line-height:1.85}.post-image{height:140px;border-radius:11px;margin-top:12px;background:#d2dfd4;overflow:hidden;position:relative}.post-image img{width:100%;height:100%;object-fit:cover}.post-image .image-caption{position:absolute;bottom:12px;left:12px;color:#526e5b;font-size:10px;letter-spacing:1.5px}.post-footer{display:flex;justify-content:flex-end;gap:17px;margin-top:12px;font-size:10px;color:var(--sub)}.post-footer .liked{color:#ac796b}.comments{background:var(--soft);padding:9px 11px;margin-top:10px;border-radius:9px;font-size:10px;line-height:1.9}.comments b{color:var(--accent);font-weight:550}.plan-card{position:relative;padding:17px;overflow:hidden}.plan-card:before{content:"";height:100%;width:3px;background:#b4c5a6;position:absolute;left:0;top:0}.plan-card .plan-number{font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:9px}.plan-card .plan-title{font-size:19px;letter-spacing:.5px;margin-bottom:8px}.plan-members{display:flex;align-items:center;margin-top:12px;gap:5px;color:var(--sub);font-size:10px}.plan-members .avatar{border:2px solid var(--card);margin-right:-11px}.plan-members span{margin-left:12px}.steps{padding-left:12px}.step{border-left:1px solid var(--line);padding:3px 0 17px 17px;position:relative}.step:last-child{border-left-color:transparent}.step:before{content:"";position:absolute;left:-4px;top:7px;background:var(--line);width:7px;height:7px;border-radius:50%}.step.current:before{background:var(--accent);box-shadow:0 0 0 4px var(--soft)}.step.current h3{color:var(--accent)}.step small{display:block;font-size:9px;margin-bottom:4px}.step h3{font-size:12px}.step p{font-size:11px;color:var(--sub)}.segmented{display:flex;background:var(--soft);padding:4px;border-radius:12px;margin-bottom:15px;gap:4px}.segmented button{flex:1;font-size:11px;padding:7px;border-radius:9px;color:var(--sub)}.segmented button.active{background:var(--card);color:var(--accent);box-shadow:0 2px 5px #1e362609}.mini-stat{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px;margin-bottom:12px}.mini-stat strong{font-size:21px;font-weight:500;color:var(--accent)}.mini-stat span{font-size:10px;color:var(--sub);line-height:1.7}.calendar-week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:15px 0}.day{display:flex;flex-direction:column;align-items:center;padding:9px 3px;border-radius:12px;gap:5px;font-size:13px;background:var(--card);border:1px solid var(--line)}.day span{font-size:9px;color:var(--sub)}.day.selected{background:var(--accent);color:var(--paper);border-color:var(--accent)}.day.selected span{color:inherit;opacity:.7}.day i{height:3px;width:3px;border-radius:50%;background:currentColor}.task-row{display:flex;gap:10px;padding:11px 0;align-items:center;border-bottom:1px solid var(--line)}.task-row:last-child{border:0}.task-check{width:22px;height:22px;border:1px solid var(--line);border-radius:7px;display:grid;place-items:center;flex-shrink:0}.task-check.done{background:var(--accent);color:var(--paper)}.task-check svg{width:15px}.task-text{flex:1}.task-text b{font-size:12px;font-weight:500;display:block}.task-text small{font-size:9px}.task-row.is-done b{text-decoration:line-through;color:var(--sub)}.progress{height:4px;background:var(--soft);border-radius:4px;overflow:hidden;margin-top:7px}.progress i{display:block;height:100%;background:var(--accent);opacity:.65}.note-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.note-card{padding:14px;background:#f6f1df;border:1px solid #e9e2cc;border-radius:14px;text-align:left;min-height:140px;color:#706349}.note-card:nth-child(3n+2){background:#e9efe3;border-color:#dfe5d7;color:#5e7051}.note-card:nth-child(3n){background:#f2e8e4;border-color:#e7dbd7;color:#95776d}.note-card h3{font-size:12px;margin-bottom:7px}.note-card p{font-size:10px;white-space:pre-wrap;line-height:1.7;max-height:92px;overflow:hidden}.note-card small{font-size:8px;color:inherit;opacity:.6;display:block;margin-top:15px}.photo-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.photo-card{border:1px solid var(--line);border-radius:13px;padding:7px;background:var(--card);text-align:left}.photo-card .photo{height:130px;background:var(--soft);border-radius:8px;display:grid;place-items:center;overflow:hidden}.photo-card img{width:100%;height:100%;object-fit:cover}.photo-card small{display:block;padding:7px 3px 2px;font-size:10px}.profile-hero{text-align:center;padding:20px 10px}.profile-hero .avatar{margin:0 auto 12px}.profile-hero h2{font-size:19px;margin-bottom:5px}.profile-hero p{font-size:11px;color:var(--sub);max-width:290px;margin:auto}.profile-hero .buttons{justify-content:center}.details{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--card)}.details summary{cursor:pointer;font-size:12px;color:var(--accent)}.details p,.details pre{font-size:11px;white-space:pre-wrap;line-height:1.9;margin-top:10px;word-break:break-word}.form-field{display:block;margin:12px 0;font-size:11px;color:var(--sub)}.form-field>span{display:block;margin-bottom:6px}.field{width:100%;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:10px;padding:10px;font-size:12px;min-height:38px}.field:focus{border-color:var(--accent)}textarea.field{min-height:84px;resize:vertical;line-height:1.7}select.field{appearance:auto;padding-right:6px}.checkbox-label{display:flex;gap:8px;align-items:flex-start;font-size:11px;line-height:1.7;margin:12px 0;color:var(--sub)}.checkbox-label input{accent-color:var(--accent);margin:4px 0 0}.two-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}.form-note{font-size:9px;color:var(--sub);line-height:1.75}.switch-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}.switch-row b{display:block;font-size:12px;font-weight:550}.switch-row small{display:block;font-size:9px;line-height:1.7;margin-top:3px}.switch{height:23px;width:39px;background:#cbd4c7;border-radius:20px;position:relative;flex-shrink:0}.switch:after{content:"";position:absolute;width:17px;height:17px;border-radius:50%;background:white;left:3px;top:3px;box-shadow:0 1px 3px #1232;transition:transform .2s}.switch.on{background:#6f9477}.switch.on:after{transform:translateX(16px)}.setting-link{display:flex;width:100%;align-items:center;text-align:left;gap:11px;padding:14px 0;border-bottom:1px solid var(--line)}.setting-link:last-child{border:0}.setting-link>svg:first-child{color:var(--accent);width:18px}.setting-link span{flex:1;font-size:12px}.setting-link small{font-size:9px;max-width:115px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.setting-link>svg:last-child{color:var(--sub);width:14px}.api-row{padding:12px;border:1px solid var(--line);border-radius:12px;margin:9px 0;background:var(--card)}.api-row .api-title{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}.api-row small{display:block;margin-top:4px;overflow-wrap:anywhere;font-size:9px}.api-row .buttons{margin-top:8px;gap:5px}.api-row .btn{padding:5px 7px;font-size:9px;min-height:28px}.route-row{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}.route-row span{font-size:11px;flex:1}.route-row select{font-size:10px;max-width:175px;padding:7px;min-height:32px}.notice-dock{position:absolute;left:17px;right:17px;top:45px;z-index:30;pointer-events:none}.toast{border:1px solid var(--line);background:var(--card);box-shadow:0 6px 28px #0c231f20;border-radius:17px;padding:13px;display:flex;gap:9px;align-items:flex-start;font-size:11px;line-height:1.7;pointer-events:auto;animation:slide-in .2s}.toast>svg{width:17px;color:var(--accent);margin-top:3px}.toast .toast-body{flex:1;white-space:pre-wrap;overflow-wrap:anywhere}.toast.error{color:var(--danger)}@keyframes slide-in{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}.modal-layer{position:absolute;inset:0;z-index:40;background:#11231972;backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:17px;border-radius:38px}.modal{background:var(--paper);border:1px solid var(--line);border-radius:22px;padding:19px;width:100%;max-height:90%;overflow:auto;box-shadow:0 20px 70px #10201726}.modal h3{font-size:16px;margin-bottom:9px}.modal .copy{font-size:12px;line-height:1.8;white-space:pre-wrap}.modal .buttons{justify-content:flex-end}.modal pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto;font:10px/1.7 ui-monospace,monospace}.modal .checks{max-height:240px;overflow:auto}.busybar{background:var(--soft);color:var(--accent);font-size:10px;display:flex;align-items:center;gap:8px;padding:7px 16px;flex-shrink:0}.busybar .spin{width:10px;height:10px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}.busybar span{flex:1}.busybar button{text-decoration:underline;font-size:10px}@keyframes spin{to{transform:rotate(360deg)}}.offnote{text-align:center;color:var(--sub);font-size:9px;padding:7px 15px;border-top:1px solid var(--line);flex-shrink:0}.log-line{padding:10px 0;border-bottom:1px solid var(--line);font-size:10px;line-height:1.7}.log-line b{font-size:10px;font-weight:550}.log-line.warning{color:var(--danger)}.search-box{display:flex;gap:8px;align-items:center;margin:0 17px 5px;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:8px 10px}.search-box input{border:0;background:none;outline:none;font-size:11px;min-width:0;flex:1;color:var(--ink)}.search-box svg{color:var(--sub);width:15px}.inline-banner{padding:8px 17px;font-size:9px;line-height:1.6;color:var(--sub);border-bottom:1px solid var(--line)}.inline-banner button{color:var(--accent);text-decoration:underline}.native-connector{width:100%;text-align:left;padding:12px;background:var(--soft);border-radius:12px;line-height:1.7}.preview-row{padding:9px 0;border-bottom:1px solid var(--line);font-size:11px;white-space:pre-wrap}.tap-text{color:var(--accent);font-size:10px;padding:4px 0}meter{width:100%;height:6px;accent-color:var(--accent)}.hidden-input{display:none!important}.danger-text{color:var(--danger)}.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.profile-locked{opacity:.5}.weekday-title{font-size:22px;letter-spacing:1px}.notes-body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.9}.floating-dot{height:6px;width:6px;border-radius:50%;background:#81a275;display:inline-block;margin-right:5px}:host([data-demo]){position:relative;right:auto;bottom:auto;z-index:1;display:block;width:398px;margin:auto}:host([data-demo]) .window{height:796px;max-height:calc(var(--tp-vh,100vh) - 52px);max-width:398px;width:398px;min-height:600px}:host([data-demo]) .launcher{margin:auto}@media(max-width:520px){:host{right:10px;bottom:10px}.window{width:min(398px,calc(100vw - 20px));height:min(800px,calc(var(--tp-vh,100vh) - 20px));border-radius:36px;padding:6px}.screen{border-radius:30px}.modal-layer{border-radius:30px}.statusbar{padding-top:6px}.island{height:21px;width:78px}.home-pad{padding-top:8px}.hero{height:166px}.hero h1{font-size:22px}.app-icon{width:48px;height:48px}.apps{row-gap:13px}.home-bottom{margin-top:14px}:host([data-demo]){width:min(398px,calc(100vw - 18px))}:host([data-demo]) .window{width:min(398px,calc(100vw - 18px));min-height:590px;max-height:none;height:780px}.launcher{padding:13px;border-radius:19px}}.calendar-month{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:12px 0 14px}.calendar-month .wk{font-size:9px;color:var(--sub);text-align:center;padding:2px 0}.mday{aspect-ratio:1/1.05;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px;background:var(--card);border:1px solid var(--line);font-size:12px;padding:0}.mday.blank{visibility:hidden}.mday.today{border-color:var(--gold);font-weight:700}.mday.selected{background:var(--accent);color:var(--paper);border-color:var(--accent)}.mday i{width:5px;height:5px;border-radius:50%;background:transparent}.mday i.has{background:#b67765}.mday i.fest{background:var(--gold)}.mday.selected i.has,.mday.selected i.fest{background:currentColor}.month-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}.month-head b{font-size:18px}.every-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 10px}.every-row span{font-size:11px;color:var(--sub)}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}\n.week-nav{display:flex;gap:6px;margin-top:10px}.day.today b{text-decoration:underline;text-underline-offset:3px}.day i{opacity:0}.day i.has{opacity:1;width:5px;height:5px;background:#b67765}.day.selected i.has{background:currentColor}.map-hero{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);background:var(--card);border-radius:17px;padding:10px 12px;margin-bottom:6px}.map-hero svg{width:100%;height:auto;border-radius:12px;background:#eef3ea}.map-hero b{font-size:13px;display:block}.map-hero small{font-size:10px}.home-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.home-card{border:1px solid #ecded9;background:#f6e9e4;color:#95776d;border-radius:14px;padding:10px 6px;text-align:center}.home-card b{display:block;font-size:12px}.home-card small{font-size:9px;color:inherit;opacity:.75}.card.pick{border-color:var(--gold)}.details.place summary{display:flex;align-items:center;gap:6px}.details.place summary .tag{margin-left:auto}:host([data-compact]) .launcher{padding:11px 14px;border-radius:18px;font-size:13px}:host([data-compact][data-open]) .window{width:100vw!important;max-width:100vw!important;height:var(--tp-vh,100vh)!important;min-height:0!important;border-radius:0;padding:0;border:0;box-shadow:none}:host([data-compact][data-open]) .screen,:host([data-compact][data-open]) .modal-layer{border-radius:0}:host([data-compact][data-open]) .statusbar{padding-top:max(7px,env(safe-area-inset-top))}:host([data-compact][data-open]) .home-indicator{height:max(10px,env(safe-area-inset-bottom))}:host([data-compact][data-open]) .minimize{width:34px;height:34px;background:var(--soft)}\n/* ===== V3.1 布局引擎：只用 left/top/width/height 像素值，绝不使用 bottom/right（酒馆移动端 html 带 transform，bottom 会指向 0 高度的根节点，入口飞出屏幕） ===== */\n:host,:host([data-compact]),:host([data-open]),:host([data-compact][data-open]){position:fixed!important;left:var(--tp-x,0px)!important;top:var(--tp-y,0px)!important;right:auto!important;bottom:auto!important;width:var(--tp-w,auto)!important;height:var(--tp-h,auto)!important;max-width:none!important;-webkit-text-size-adjust:100%;text-size-adjust:100%}\n:host([data-demo]){position:relative!important;left:auto!important;top:auto!important;width:398px!important;height:auto!important;max-width:calc(100vw - 18px)!important}\n.launcher{touch-action:none;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;cursor:pointer;min-width:44px;min-height:44px;transition:transform .16s,box-shadow .16s}\n.launcher.dragging{cursor:grabbing;transform:scale(1.08);box-shadow:0 16px 36px #1e352f66;transition:none}\n:host([data-mode=phone]) .launcher,:host([data-mode=tablet]) .launcher{width:54px;height:54px;padding:0!important;border-radius:50%!important;justify-content:center;gap:0;box-shadow:0 8px 26px #1e352f55}\n:host([data-mode=phone]) .launcher>span:not(#launcher-count),:host([data-mode=tablet]) .launcher>span:not(#launcher-count){display:none}\n:host([data-mode=phone]) .launcher .badge,:host([data-mode=tablet]) .launcher .badge{right:-2px;top:-2px}\n.window{-webkit-tap-highlight-color:transparent}\n.window:not([hidden]){animation:tp-pop .22s cubic-bezier(.2,.8,.2,1)}\n@keyframes tp-pop{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}\n:host([data-mode=wide][data-open]) .window{max-width:calc(100vw - 12px)}\n:host([data-mode=phone][data-open]) .window{width:100%!important;max-width:none!important;height:100%!important;min-height:0!important;border-radius:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:var(--paper)!important}\n:host([data-mode=phone][data-open]) .screen,:host([data-mode=phone][data-open]) .modal-layer{border-radius:0!important}\n:host([data-mode=phone][data-open]) .island{display:none}\n:host([data-mode=phone][data-open]) .statusbar{height:auto;min-height:38px;padding:max(8px,env(safe-area-inset-top)) 16px 4px}\n:host([data-mode=phone][data-open]) .minimize{width:34px;height:34px;background:var(--soft)}\n:host([data-mode=tablet][data-open]){display:flex!important;align-items:center;justify-content:center;background:rgba(22,34,28,.46)}\n:host([data-mode=tablet][data-open]) .window{flex:none;width:var(--tp-fw,440px)!important;height:var(--tp-fh,860px)!important;max-width:none!important;min-height:0!important}\n:host([data-mode=tablet][data-open]) .minimize{width:32px;height:32px;background:var(--soft)}\n@media(pointer:coarse){.btn,.chip,.app,.setting-link,.dock button,.icon-btn{min-height:40px}.field{font-size:16px}}\n.main{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}\n:host([data-mode=tablet][data-open]) .window{border-radius:46px!important;padding:8px!important;border:1px solid #e5e9e2!important;box-shadow:var(--shadow)!important}\n:host([data-mode=tablet][data-open]) .screen,:host([data-mode=tablet][data-open]) .modal-layer{border-radius:38px!important}\n:host([data-compact]) .screen,:host([data-compact]) .main{touch-action:pan-y}\n\n/* ===== 剧情规划（面·线·点） ===== */\n.arc-title{font-size:24px;margin:5px 0 4px;letter-spacing:1px}\n.arc-auto{margin-bottom:10px}\n.arc-modes,.arc-tabs,.arc-dirs{margin:10px 0}\n.arc-tabs button{font-size:12px;padding-left:4px;padding-right:4px}\n.arc-timeline{position:relative;margin:10px 0 6px}\n.arc-timeline:before{content:"";position:absolute;left:8px;top:12px;bottom:14px;width:2px;background:var(--line)}\n.arc-beat{position:relative;display:flex;gap:10px;padding:2px 0 10px}\n.arc-dot{flex:none;width:18px;height:18px;border-radius:50%;background:var(--card);border:2px solid var(--line);margin-top:6px;position:relative;z-index:1}\n.arc-beat.past .arc-dot{background:var(--accent);border-color:var(--accent)}\n.arc-beat.current .arc-dot{background:var(--gold);border-color:var(--gold);box-shadow:0 0 0 4px #aa8d5630}\n.arc-beat.next .arc-dot{border-color:var(--gold)}\n.arc-beat-body{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:11px 12px}\n.arc-beat.past .arc-beat-body{opacity:.74}\n.arc-beat.current .arc-beat-body{border-color:var(--gold)}\n.arc-beat-body h3{margin:4px 0 4px;font-size:15px}\n.arc-beat-body small{color:var(--sub);font-size:10px}\n.arc-beat-body p{font-size:12px;color:var(--ink)}\n.arc-sub{font-size:11px!important;color:var(--sub)!important;font-style:italic;margin-top:5px}\n.arc-bar{height:6px;border-radius:4px;background:var(--soft);overflow:hidden;margin:8px 0 4px}\n.arc-bar i{display:block;height:100%;background:var(--accent);border-radius:4px}\n.arc-stages{display:flex;gap:4px;margin:8px 0 2px}\n.arc-stages i{flex:1;height:4px;border-radius:2px;background:var(--line)}\n.arc-stages i.on{background:var(--accent)}\n.arc-line.pinned{border-color:var(--gold)}\n.arc-line.ended{opacity:.68}\n.arc-day{margin:12px 0 6px}\n.arc-day-head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}\n.arc-day-head b{font-size:15px}\n.arc-day-head span{font-size:11px;color:var(--sub)}\n.arc-day-head i{margin-left:auto;font-style:normal;font-size:11px;color:var(--sub);display:inline-flex;gap:3px;align-items:center}\n.arc-day-empty{padding:4px 2px}\n.arc-pt.done{opacity:.62}\n.arc-pt.done h3{text-decoration:line-through}\n.arc-inject{margin-top:14px}\n.arc-inject .chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}\n.arc-inject .chip{flex:1}\n\n.arc .row-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}\n.arc .row-top small{color:var(--sub);font-size:10px}\n.arc-auto{padding:0;overflow:hidden}\n.arc-auto>*:not(.arc-auto-head){margin-left:14px;margin-right:14px}\n.arc-auto>.buttons{margin-bottom:14px}\n.arc-auto.folded{margin-bottom:10px}\n.arc-auto-head{display:flex;align-items:center;gap:8px;width:100%;padding:12px 14px;text-align:left;flex-wrap:wrap}\n.arc-auto-head .arc-auto-title{display:inline-flex;align-items:center;gap:6px;color:var(--accent)}\n.arc-auto-head .arc-auto-title b{color:var(--ink);font-size:13px}\n.arc-auto-head .tag{margin:0}\n.arc-auto-head small{flex:1;min-width:120px;color:var(--sub);font-size:10px;text-align:right}\n.arc-fold{display:inline-flex;transition:transform .2s;color:var(--sub)}\n.arc-fold.open{transform:rotate(90deg)}\n.arc-auto:not(.folded)>.hint,.arc-auto:not(.folded)>.switch-row,.arc-auto:not(.folded)>.segmented{margin-top:8px}\n\n/* ===== V3.2：选人窗口 / 世界书导入 / 模块开关 / 记忆世界书卡片 ===== */\n.filter-row[hidden]{display:none!important}\n.pick-tools{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}\n.pick-tools .btn{padding:6px 12px;font-size:12px}\n.pick-filter{margin:4px 0 6px}\n.pick-list{max-height:min(46vh,340px);border:1px solid var(--line);border-radius:12px;padding:2px 12px}\n.pick-list .checkbox-label{margin:8px 0;color:var(--ink);font-size:13px}\n.pick-list .checkbox-label input{margin-top:5px;flex:none}\n.pick-note{display:block;color:var(--sub);font-size:11px;line-height:1.5;margin-top:1px;word-break:break-all}\n.module-row{flex-direction:column;align-items:stretch;gap:8px}\n.module-head{display:flex;align-items:center;gap:10px}\n.module-head>span{flex:1;font-size:13px}\n.module-row.is-off select{opacity:.5}\n.module-row.is-off .module-head>span{color:var(--sub);text-decoration:line-through}\n.book-card{border:1px solid var(--line)}\n.book-card .row-top{align-items:flex-start;gap:8px}\n.book-card h3{margin:0;word-break:break-all}\n.memory-card.is-off{opacity:.62}\n/* ===== V1.6.3：全模块删除管理栏 & 恋爱心迹 ===== */\n.tp-del-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 11px;margin:8px 0 10px;background:var(--soft);border:1px solid var(--line);border-radius:13px;font-size:11px}\n.tp-del-count{color:var(--sub)}\n.tp-del-count b{color:var(--ink);font-weight:600}\n.tp-del-actions{display:flex;gap:6px;align-items:center}\n.tp-mini-btn{padding:4px 9px!important;font-size:11px!important;border-radius:9px!important;min-height:26px!important;display:inline-flex;align-items:center;gap:4px}\n.tp-note-wrap,.tp-photo-wrap{position:relative;display:flex;flex-direction:column}\n.tp-note-main,.tp-photo-main{text-align:left;width:100%;flex:1}\n.tp-note-del,.tp-photo-del{position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:8px;background:rgba(255,255,255,.78);color:var(--danger);opacity:.78;z-index:2}\n.window[data-theme=night] .tp-note-del,.window[data-theme=night] .tp-photo-del{background:rgba(36,51,42,.85)}\n.tp-note-del:hover,.tp-photo-del:hover{opacity:1;background:var(--card)}\n.bubble-tools button[data-action="delete-chat-msg"]{color:var(--sub);opacity:.65;margin-left:4px}\n.bubble-tools button[data-action="delete-chat-msg"]:hover{color:var(--danger);opacity:1}\n.heart-panel{border:1px solid #ead5d3;background:linear-gradient(180deg,#fdf8f7 0%,var(--card) 100%)}\n.window[data-theme=night] .heart-panel{border-color:#5a3f42;background:linear-gradient(180deg,#2e2326 0%,var(--card) 100%)}\n.heart-panel-title{display:inline-flex;align-items:center;gap:6px}\n.heart-badge-icon{width:24px;height:24px;border-radius:8px;background:#f6e2df;color:#b25d63;display: inline-grid;place-items:center}\n.window[data-theme=night] .heart-badge-icon{background:#4d3135;color:#e39ca1}\n.heart-npc-strip{margin-top:10px;padding:8px 10px;border-radius:12px;background:rgba(246,233,228,.55);border:1px dashed #e3c8c3}\n.window[data-theme=night] .heart-npc-strip{background:rgba(68,46,49,.45);border-color:#5c3f43}\n.heart-npc-pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}\n.heart-npc-pill{display:inline-flex;align-items:center;gap:5px;padding:5px 9px;border-radius:999px;background:var(--card);border:1px solid #e5ccc8;font-size:11px;color:var(--ink);transition:transform .12s,border-color .12s}\n.window[data-theme=night] .heart-npc-pill{border-color:#5b4245}\n.heart-npc-pill:hover{transform:translateY(-1px);border-color:#c67b80}\n.heart-npc-pill.is-present{border-color:#c67b80;background:#fcf1ef}\n.window[data-theme=night] .heart-npc-pill.is-present{background:#3c2a2d;border-color:#9e5f64}\n.heart-npc-pill span{color:var(--sub);font-size:10px}\n.heart-npc-pill .pill-tag{font-style:normal;font-size:9px;padding:1px 5px;border-radius:999px;background:#e8efe7;color:var(--accent)}\n.heart-npc-pill .pill-tag.gold{background:#f2eddd;color:var(--gold)}\n.heart-auto-bar{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}\n.heart-card{border:1px solid #ead5d3;background:linear-gradient(180deg,#fffafa 0%,var(--card) 48%);position:relative;overflow:hidden}\n.window[data-theme=night] .heart-card{border-color:#573d40;background:linear-gradient(180deg,#2b2123 0%,var(--card) 48%)}\n.heart-meta-strip{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;padding:5px 9px;border-radius:9px;background:var(--soft);font-size:11px;color:var(--sub)}\n.heart-meta-strip b{color:var(--ink)}\n.heart-title{margin:10px 0 6px;font-size:15px;color:#8e464c}\n.window[data-theme=night] .heart-title{color:#e6a6ac}\n.heart-box{margin:7px 0;padding:8px 10px;border-radius:11px;font-size:12px;line-height:1.55}\n.heart-box b{display:block;font-size:11px;margin-bottom:2px}\n.heart-box.surface{background:var(--soft);color:var(--ink)}\n.heart-box.reply{background:#faecea;border-left:3px solid #c67b80;color:#5a2e32}\n.window[data-theme=night] .heart-box.reply{background:#3a272a;border-left-color:#c67b80;color:#ebd3d5}\n.heart-body{margin-top:8px;font-size:12.5px;line-height:1.7;white-space:pre-wrap}\n.heart-secret{margin-top:9px;padding:7px 10px;border-radius:10px;border:1px dashed #dfb8b4;background:#fdf4f2;font-size:11.5px;color:#7d4247}\n.window[data-theme=night] .heart-secret{border-color:#634347;background:#332325;color:#dfb2b6}\n.heart-secret span{font-weight:600}\n.heart-followups{margin-top:9px;border-top:1px dashed var(--line);padding-top:8px;display:flex;flex-direction:column;gap:6px}\n.heart-followup-item{padding:7px 9px;border-radius:10px;background:var(--soft);font-size:11.5px;line-height:1.55}\n.heart-followup-item .hf-q{color:var(--sub);margin-bottom:3px}\n.heart-followup-item .hf-a{color:var(--ink);white-space:pre-wrap}\n';
 
   // src/ui/icons.js
   var paths = {
@@ -4908,7 +5834,7 @@ ${from.bio.trim()}`;
   function messagesView(ui) {
     const s = ui.data;
     const rows = [...s.threads].sort((a, b) => (b.messages.at(-1)?.ts || b.createdAt) - (a.messages.at(-1)?.ts || a.createdAt));
-    return `<div class="subnav"><button class="chip active" data-action="go" data-id="messages">全部消息</button><button class="chip" data-action="go" data-id="contacts">通讯录</button><button class="chip" data-action="go" data-id="outbox">待发 ${s.threads.reduce((n, t) => n + t.pending.length, 0)}</button></div><div class="inline-banner">${ui.engine.bridge.mode === "demo" ? "离线演示 · 角色消息为演示样例，不连接真实模型" : "来信、已读与约定会接入当前正文参考"}<button data-action="proactive">检查来信</button></div><div class="list">${rows.length ? rows.map((t) => {
+    return `<div class="subnav"><button class="chip active" data-action="go" data-id="messages">全部消息</button><button class="chip" data-action="go" data-id="contacts">通讯录</button><button class="chip" data-action="go" data-id="outbox">待发 ${s.threads.reduce((n, t) => n + t.pending.length, 0)}</button></div><div class="inline-banner">${ui.engine.bridge.mode === "demo" ? "离线演示 · 角色消息为演示样例，不连接真实模型" : "来信、已读与约定会接入当前正文参考"}<button data-action="proactive">检查来信</button></div>${ rows.length ? `<div style="padding:8px 17px 0">${tpDeleteBar("threads", rows.length, "会话")}</div>` : "" }<div class="list">${rows.length ? rows.map((t) => {
       const c = s.contacts.find((c2) => c2.id === t.members[0]), last = t.messages.at(-1), unread = t.messages.filter((m) => m.role === "character" && !m.read).length;
       return `<button class="list-row" data-action="thread" data-id="${e(t.id)}">${t.kind === "group" ? `<span class="avatar blue">${icon("people", 22)}</span>` : avatar(c)}<div class="body"><div class="row-top"><b>${e(t.title)}</b><time>${last ? e(time(last.ts)) : ""}</time></div><p>${t.pending.length ? "[待发 " + t.pending.length + " 条] " : ""}${e(last?.text || "说点什么，或者等一封来信。")}</p></div>${unread ? `<span class="badge">${unread}</span>` : ""}</button>`;
     }).join("") : empty("消息，慢慢说", "去通讯录开启一个会话；启用后台后，角色也可以主动联系。", "chat")}</div><div class="pad">${button(icon("people", 15) + " 新建群聊", "new-group", "", "wide ghost")}</div>`;
@@ -4917,9 +5843,9 @@ ${from.bio.trim()}`;
     const s = ui.data, t = s.threads.find((t2) => t2.id === ui.route.id);
     if (!t) return empty("会话不在当前存档", "可能切换了聊天或分支，请返回消息列表。");
     const busy = ui.engine.runner.active?.module === "chat";
-    return `<div class="chat-scroll"><div class="chat-meta">${t.kind === "group" ? e(t.members.map((n) => contactName(s, n)).join("、")) : "仅你和" + e(t.title) + "参与此会话"}</div>${t.historyMembersNote ? hint(t.historyMembersNote, true) : ""}${t.messages.map((m) => {
+    return `<div class="chat-scroll"><div class="chat-meta">${t.kind === "group" ? e(t.members.map((n) => contactName(s, n)).join("、")) : "仅你和" + e(t.title) + "参与此会话"}</div>${t.messages.length ? tpDeleteBar("chat:" + t.id, t.messages.length, "消息") : ""}${t.historyMembersNote ? hint(t.historyMembersNote, true) : ""}${t.messages.map((m) => {
       const me = m.role === "user", c = s.contacts.find((c2) => c2.id === m.author);
-      return `<div class="message ${me ? "me" : ""}">${avatar(me ? null : c, "small")}<div class="message-body">${!me && t.kind === "group" ? `<div class="message-name">${e(c?.name || "成员")}</div>` : ""}<div class="bubble">${m.mediaId ? `<img data-media="${e(m.mediaId)}" alt="手机图片附件">` : ""}${e(m.text)}</div><div class="bubble-tools"><span>${e(m.story || time(m.ts))}</span>${m.source === "proactive" ? "<span>主动来信</span>" : ""}${!me ? `<button data-action="speak" data-id="${e(m.id)}" aria-label="朗读消息">${icon("volume", 12)}</button>` : ""}</div></div></div>`;
+      return `<div class="message ${me ? "me" : ""}">${avatar(me ? null : c, "small")}<div class="message-body">${!me && t.kind === "group" ? `<div class="message-name">${e(c?.name || "成员")}</div>` : ""}<div class="bubble">${m.mediaId ? `<img data-media="${e(m.mediaId)}" alt="手机图片附件">` : ""}${e(m.text)}</div><div class="bubble-tools"><span>${e(m.story || time(m.ts))}</span>${m.source === "proactive" ? "<span>主动来信</span>" : ""}${!me ? `<button data-action="speak" data-id="${e(m.id)}" aria-label="朗读消息">${icon("volume", 12)}</button>` : ""}<button data-action="delete-chat-msg" data-id="${e(t.id + "|" + m.id)}" aria-label="删除此消息" title="删除此消息">${icon("trash", 11)}</button></div></div></div>`;
     }).join("")}${busy ? `<div class="message">${avatar(s.contacts.find((c) => c.id === t.members[0]), "small")}<div class="bubble typing"><i></i><i></i><i></i></div></div>` : ""}<div data-chat-end></div></div>`;
   }
   function composerView(ui) {
@@ -4930,7 +5856,7 @@ ${from.bio.trim()}`;
   }
   function contactsView(ui) {
     const s = ui.data, rows = [...s.contacts].sort((a, b) => Number(contactAvailable(b)) - Number(contactAvailable(a))), removed = (s.removedContacts || []).length;
-    return `<div class="pad">${hint("带锁的人物暂时不能发消息。角色卡人物默认已全部解锁（可在 设置 里改成按剧情逐个解锁）；也可以从世界书里选人一键导入。")}<div class="buttons">${button(icon("plus", 14) + " 添加联系人", "edit-contact")}${button(icon("book", 14) + " 从世界书导入", "import-wb-contacts")}${button(icon("people", 14) + " 建一个群", "new-group")}</div></div><div class="list">${rows.length ? rows.map((c) => `<button class="list-row ${!contactAvailable(c) ? "profile-locked" : ""}" data-action="contact" data-id="${e(c.id)}">${avatar(c)}<div class="body"><b>${e(c.name)}</b><p>${e(c.status)}</p></div>${!contactAvailable(c) ? icon("lock", 14) : icon("arrow", 14)}</button>`).join("") : empty("通讯录是空的", "可以手动添加，或从世界书里选人导入。", "people")}</div>${removed ? `<div class="pad">${button("已移除的角色卡人物（" + removed + "）· 恢复", "restore-contacts")}</div>` : ""}`;
+    return `<div class="pad">${hint("带锁的人物暂时不能发消息。角色卡人物默认已全部解锁（可在 设置 里改成按剧情逐个解锁）；也可以从世界书里选人一键导入。")}<div class="buttons">${button(icon("plus", 14) + " 添加联系人", "edit-contact")}${button(icon("book", 14) + " 从世界书导入", "import-wb-contacts")}${button(icon("people", 14) + " 建一个群", "new-group")}</div>${rows.length ? tpDeleteBar("contacts", rows.length, "联系人") : ""}</div><div class="list">${rows.length ? rows.map((c) => `<button class="list-row ${!contactAvailable(c) ? "profile-locked" : ""}" data-action="contact" data-id="${e(c.id)}">${avatar(c)}<div class="body"><b>${e(c.name)}</b><p>${e(c.status)}</p></div>${!contactAvailable(c) ? icon("lock", 14) : icon("arrow", 14)}</button>`).join("") : empty("通讯录是空的", "可以手动添加，或从世界书里选人导入。", "people")}</div>${removed ? `<div class="pad">${button("已移除的角色卡人物（" + removed + "）· 恢复", "restore-contacts")}</div>` : ""}`;
   }
   function contactView(ui) {
     const s = ui.data, c = s.contacts.find((c2) => c2.id === ui.route.id);
@@ -4940,14 +5866,15 @@ ${from.bio.trim()}`;
   }
   function feedView(ui) {
     const s = ui.data;
-    return `<div class="feed-header">${landscape}<div class="caption">日常也值得，被看见。</div></div><div class="subnav"><button class="chip active">朋友的日常</button><button class="chip" data-action="new-post">${icon("plus", 13)}写动态</button><button class="chip" data-action="generate-post">${icon("spark", 13)}生成动态…</button></div>${s.feed.length ? [...s.feed].reverse().map((p) => {
+    return `<div class="feed-header">${landscape}<div class="caption">日常也值得，被看见。</div></div><div class="subnav"><button class="chip active">朋友的日常</button><button class="chip" data-action="new-post">${icon("plus", 13)}写动态</button><button class="chip" data-action="generate-post">${icon("spark", 13)}生成动态…</button></div>${s.feed.length ? `<div style="padding:6px 17px 0">${tpDeleteBar("feed", s.feed.length, "动态")}</div>` : ""}${s.feed.length ? [...s.feed].reverse().map((p) => {
       const c = s.contacts.find((c2) => c2.id === p.author);
       return `<article class="post"><div class="post-head">${avatar(p.author === "user" ? null : c)}<div class="meta"><b>${e(contactName(s, p.author))}</b><small>${e(p.story || time(p.ts))} · ${p.source === "demo" ? "演示动态" : "生活动态"}</small></div><button class="icon-btn" data-action="delete-post" data-id="${e(p.id)}" aria-label="删除此条动态">${icon("more", 16)}</button></div><p class="post-body">${e(p.text)}</p>${p.mediaId ? `<div class="post-image"><img data-media="${e(p.mediaId)}" alt="动态照片"></div>` : p.theme && p.theme !== "none" ? `<div class="post-image">${landscape}<span class="image-caption">MOMENTS OF EVERYDAY · 装饰画</span></div>` : ""}<div class="post-footer"><button class="${p.likes.includes("user") ? "liked" : ""}" data-action="like" data-id="${e(p.id)}">${icon("heart", 15)} ${p.likes.length || "喜欢"}</button><button data-action="comment" data-id="${e(p.id)}">${icon("chat", 15)} 评论</button><button data-action="share-post" data-id="${e(p.id)}">分享</button><button data-action="post-reply" data-id="${e(p.id)}">请回复</button></div>${p.comments.length ? `<div class="comments">${p.comments.map((c2) => `<div><b>${e(contactName(s, c2.author))}：</b>${e(c2.text)}</div>`).join("")}</div>` : ""}</article>`;
     }).join("") : empty("今天还没发动态", "发一件小事，或请一位角色写下他/她的日常。", "feed")}`;
   }
   function outboxView(ui) {
     const rows = ui.data.threads.filter((t) => t.pending.length);
-    return `<div class="pad">${hint("待发不是已发送。只有你按发送或回复，内容才会交给模型；后台不会偷看未发送草稿。")}${rows.length ? rows.map((t) => `<div class="card"><h3>${e(t.title)}</h3>${t.pending.map((p, i) => `<p class="preview-row">${i + 1}. ${e(p.text)}</p>`).join("")}<div class="buttons">${button("打开会话", "thread", t.id)}${button("发送这些消息", "send-pending", t.id, "primary")}</div></div>`).join("") : empty("待发箱空空的", "想说的话，可以先留一会儿。", "mail")}</div>`;
+    const totalPending = rows.reduce((n, t) => n + t.pending.length, 0);
+    return `<div class="pad">${hint("待发不是已发送。只有你按发送或回复，内容才会交给模型；后台不会偷看未发送草稿。")}${totalPending ? tpDeleteBar("outbox", totalPending, "待发消息") : ""}${rows.length ? rows.map((t) => `<div class="card"><h3>${e(t.title)}</h3>${t.pending.map((p, i) => `<p class="preview-row">${i + 1}. ${e(p.text)}</p>`).join("")}<div class="buttons">${button("打开会话", "thread", t.id)}${button("发送这些消息", "send-pending", t.id, "primary")}</div></div>`).join("") : empty("待发箱空空的", "想说的话，可以先留一会儿。", "mail")}</div>`;
   }
 
   // src/ui/pick.js
@@ -5245,7 +6172,14 @@ ${from.bio.trim()}`;
   }
   async function diaryEditor(ui, diaryId) {
     const snap = snapshot(ui), row = ui.data.diary.find((n) => n.id === diaryId), world = storyFor(ui.data, snap);
-    const r = await ui.dialog(row ? "读一篇日记" : "写一篇日记", field("标题", "title", row?.title || "", { required: true, max: 80 }) + field("剧情日期", "date", row?.date || world.date, { type: "date" }) + field("记录", "text", row?.text || "", { textarea: true, required: true, max: 6e3 }) + checkbox("我已核对，这篇不是未经确认的AI草稿", "confirmed", row?.status === "confirmed") + (row ? checkbox("删除这篇手机日记", "remove", false) : ""));
+    const isHeart = row?.kind === "heart";
+    const r = await ui.dialog(row ? (isHeart ? "编辑恋爱心迹" : "读一篇日记") : "写一篇日记",
+      field("标题", "title", row?.title || "", { required: true, max: 80 }) +
+      field("剧情日期", "date", row?.date || world.date, { type: "date" }) +
+      (isHeart ? field("情绪关键词", "mood", row?.mood || "", { max: 24 }) + field("心动指数", "heartbeat", row?.heartbeat || "", { max: 36 }) + field("本楼表面装作", "surface", row?.surface || "", { textarea: true, max: 240 }) + field("心底回应（致本楼的你）", "replyToFloor", row?.replyToFloor || "", { textarea: true, max: 400 }) : "") +
+      field(isHeart ? "恋爱心迹独白" : "记录", "text", row?.text || "", { textarea: true, required: true, max: 6e3 }) +
+      (isHeart ? field("未说出口的小秘密", "secret", row?.secret || "", { textarea: true, max: 260 }) : checkbox("我已核对，这篇不是未经确认的AI草稿", "confirmed", row?.status === "confirmed")) +
+      (row ? checkbox(isHeart ? "删除这条恋爱心迹" : "删除这篇手机日记", "remove", false) : ""));
     if (!r) return;
     if (r.date) isoDay(r.date);
     still(ui, snap);
@@ -5254,10 +6188,23 @@ ${from.bio.trim()}`;
         s.diary = s.diary.filter((x) => x.id !== diaryId);
         return;
       }
-      const entry = { title: text(r.title, 80), date: r.date || "", text: text(r.text, 6e3), status: r.confirmed ? "confirmed" : "draft", ts: Date.now() };
+      const entry = {
+        title: text(r.title, 80),
+        date: r.date || "",
+        text: text(r.text, 6e3),
+        status: isHeart ? "confirmed" : (r.confirmed ? "confirmed" : "draft"),
+        ts: Date.now(),
+        ...(isHeart ? {
+          mood: text(r.mood || row?.mood || "", 24),
+          heartbeat: text(r.heartbeat || row?.heartbeat || "", 36),
+          surface: text(r.surface || "", 240),
+          replyToFloor: text(r.replyToFloor || "", 400),
+          secret: text(r.secret || "", 260)
+        } : {})
+      };
       if (row) Object.assign(s.diary.find((x) => x.id === diaryId), entry);
       else limitAppend(s.diary, { id: id("diary"), ...entry, source: "玩家记录" }, 300, "日记");
-    }, "保存日记", snap);
+    }, isHeart ? "保存恋爱心迹" : "保存日记", snap);
   }
   async function taskEditor(ui) {
     const snap = snapshot(ui);
@@ -6099,6 +7046,268 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
         await ui.confirm("柏宝书渠道测活结果", results.join("\n"), "知道了");
         return;
       }
+      // ===== 恋爱心迹（每楼层角色心声 & 联动百宝书主要配角） =====
+      case "diary-tab":
+        ui.go("diary", "", { tab: value || "all", author: ui.route.author || "all", floor: ui.route.floor || "all", replace: true });
+        return;
+      case "diary-floor":
+        ui.go("diary", "", { tab: ui.route.tab || "all", author: ui.route.author || "all", floor: value || "all", replace: true });
+        return;
+      case "heart-auto-toggle": {
+        const st = engine.settings, cur = heartPrefs();
+        const next = !cur.autoEveryFloor;
+        st.update({ ui: { ...st.data.ui, heartTrace: { ...cur, autoEveryFloor: next } } });
+        ui.notify(next ? "已开启：每当新楼层回复完成时，将自动生成主要配角的恋爱心迹。" : "已关闭每楼层自动生成恋爱心迹。");
+        return;
+      }
+      case "heart-auto-mode": {
+        const st = engine.settings, cur = heartPrefs();
+        if (!["baibai_main", "present", "pinned"].includes(value)) return;
+        st.update({ ui: { ...st.data.ui, heartTrace: { ...cur, autoMode: value } } });
+        return;
+      }
+      case "heart-pick-pinned": {
+        assert(ui.data, "先打开一个聊天");
+        const snapNow = snapshot(ui);
+        await change(ui, (s) => {
+          syncBaibaiMainNpcsToContacts(s, null, { onlyImportantOrPresent: true });
+        }, "同步百宝书角色", snapNow).catch(() => {});
+        const cur = heartPrefs();
+        const { list: bbMain } = baibaiMainNpcsForHeart(ui.data, snapNow);
+        const bbMap = new Map(bbMain.map((n) => [nameKey(n.name), n]));
+        const pool = ui.data.contacts.filter((c) => c.age === null || c.age >= 12).map((c) => {
+          const b = bbMap.get(nameKey(c.name));
+          return {
+            id: c.id,
+            name: c.name,
+            note: [b?.important ? "★百宝书主配" : "", b?.present ? "在场" : "", b?.affinityText || b?.relation || c.status].filter(Boolean).join(" · ")
+          };
+        });
+        const r = await ui.dialog("恋爱心迹 · 自动联动与关注设置", `${select("自动联动对象", "autoMode", [["baibai_main", "百宝书主要配角（核心/在场/有好感度的角色）"], ["present", "当前楼层在场角色"], ["pinned", "仅下方勾选的固定关注角色"]], cur.autoMode)}${field("每楼层自动生成最多人数（1—4）", "maxPerFloor", cur.maxPerFloor, { type: "number" })}${checkbox("将生成的恋爱心迹回写到百宝月夜书【小手机·恋爱心迹】", "syncToBaibai", cur.syncToBaibai)}<div class="section-label">固定关注的角色（勾选）</div>${pickTools()}${filterBox("搜索角色姓名…")}${peopleChecks(pool, { checked: cur.pinnedIds })}`, { submit: "保存设置" });
+        if (!r) return;
+        const st = engine.settings;
+        st.update({
+          ui: {
+            ...st.data.ui,
+            heartTrace: {
+              ...cur,
+              autoMode: ["baibai_main", "present", "pinned"].includes(r.autoMode) ? r.autoMode : cur.autoMode,
+              maxPerFloor: Math.min(4, Math.max(1, Math.trunc(Number(r.maxPerFloor) || 2))),
+              syncToBaibai: !!r.syncToBaibai,
+              pinnedIds: Array.isArray(r.members) ? r.members : []
+            }
+          }
+        });
+        ui.notify("恋爱心迹联动设置已保存。");
+        return;
+      }
+      case "heart-sync-baibai": {
+        assert(ui.data, "先打开一个聊天");
+        const brief = baibaiBrief(null, { maxAge: 0 });
+        assert(brief, "未检测到百宝月夜书简报，请确认百宝月夜书已开启小手机联动");
+        const snapNow = snapshot(ui);
+        let res = { added: [], updated: 0 };
+        await change(ui, (s) => {
+          res = syncBaibaiMainNpcsToContacts(s, brief, { onlyImportantOrPresent: false });
+        }, "同步百宝书主要配角", snapNow);
+        ui.notify(res.added.length || res.updated
+          ? `已同步百宝月夜书角色：新增 ${res.added.length} 位（${res.added.map((c) => c.name).join("、")}），更新 ${res.updated} 位资料。`
+          : "通讯录已包含百宝月夜书中的全部主要配角。");
+        return;
+      }
+      case "quick-heart-baibai": {
+        assert(ui.data, "先打开一个聊天");
+        const snapNow = snapshot(ui);
+        await change(ui, (s) => {
+          syncBaibaiMainNpcsToContacts(s, null, { onlyImportantOrPresent: true });
+        }, "同步百宝书主要配角", snapNow).catch(() => {});
+        const picked = pickAutoHeartContacts(ui.data, snapNow);
+        assert(picked.length, "没有找到可生成心迹的角色，请先添加联系人或同步百宝书角色");
+        await engine.actions.heartTraces(picked, { floor: snapNow.floor });
+        ui.go("diary", "", { tab: "heart", replace: true });
+        return;
+      }
+      case "quick-heart-npc": {
+        assert(ui.data, "先打开一个聊天");
+        const npcName = text(value, 40);
+        assert(npcName, "未指定角色");
+        const snapNow = snapshot(ui);
+        let targetId = "";
+        await change(ui, (s) => {
+          syncBaibaiMainNpcsToContacts(s, null, { onlyImportantOrPresent: false });
+          let c = s.contacts.find((x) => nameKey(x.name) === nameKey(npcName));
+          if (!c) {
+            c = addContact(s, { name: npcName, bio: "百宝月夜书联动角色", status: "百宝书主要配角", recognized: true, reachable: true, color: "rose" });
+          }
+          targetId = c.id;
+        }, "准备角色心迹：" + npcName, snapNow);
+        assert(targetId, "无法定位角色：" + npcName);
+        await engine.actions.heartTraces([targetId], { floor: snapNow.floor });
+        ui.go("diary", "", { tab: "heart", replace: true });
+        return;
+      }
+      case "generate-heart-trace": {
+        assert(ui.data, "先打开一个聊天");
+        const snapNow = snapshot(ui);
+        await change(ui, (s) => {
+          syncBaibaiMainNpcsToContacts(s, null, { onlyImportantOrPresent: false });
+        }, "同步百宝书角色", snapNow).catch(() => {});
+        const fctx = collectFloorContext(engine.bridge, snapNow);
+        const floorChoices = fctx.floors.length
+          ? [...fctx.floors].reverse().map((f) => [String(f.floor), `#${f.floor + 1}楼 · ${f.name}：${text(f.text, 28)}`])
+          : [[String(snapNow.floor ?? 0), `当前 #${(snapNow.floor ?? 0) + 1}楼`]];
+        const { list: bbMain } = baibaiMainNpcsForHeart(ui.data, snapNow);
+        const bbMap = new Map(bbMain.map((n) => [nameKey(n.name), n]));
+        const people = ui.data.contacts.filter((c) => c.age === null || c.age >= 12);
+        const pool = people.map((c) => {
+          const b = bbMap.get(nameKey(c.name));
+          return {
+            id: c.id,
+            name: c.name,
+            note: [b?.important ? "★百宝书主配" : "", b?.present ? "在场" : "", b?.affinityText || b?.relation || c.status].filter(Boolean).join(" · ")
+          };
+        });
+        const defaultChecked = pickAutoHeartContacts(ui.data, snapNow);
+        const presentIds = people.filter((c) => (snapNow.present || []).some((p) => nameKey(p) === nameKey(c.name)) || bbMap.get(nameKey(c.name))?.present).map((c) => c.id);
+        const r = await ui.dialog("生成恋爱心迹 · 选楼层与角色", `${hint("可针对任意楼层的正文互动，生成角色当下的表面伪装、心底对你的回应与第一人称恋爱心迹。已联动百宝月夜书的主要配角与好感状态。")}${select("目标正文楼层", "floor", floorChoices, String(fctx.targetFloor))}${select("选人方式", "mode", [["pick", "使用下方勾选的角色"], ["baibai", "自动选百宝书主要配角 / 在场角色"], ["random", "随机抽取角色"]], "pick")}${field("心迹侧重提示（可选，如：嘴硬吃醋 / 偷偷心动）", "focusHint", "", { max: 200, placeholder: "留空则按本楼层正文与好感度自然推演" })}<div class="section-label">选择角色（最多 4 位）</div>${pickTools(presentIds, "本楼在场/主配")}${filterBox("搜索角色…")}${peopleChecks(pool, { checked: defaultChecked })}`, { submit: "生成恋爱心迹" });
+        if (!r) return;
+        let picked = Array.isArray(r.members) ? r.members : [];
+        if (r.mode === "baibai") picked = pickAutoHeartContacts(ui.data, snapNow);
+        else if (r.mode === "random") picked = [...people].sort(() => Math.random() - 0.5).slice(0, 2).map((c) => c.id);
+        picked = picked.slice(0, 4);
+        assert(picked.length, "请至少选择一位角色");
+        await engine.actions.heartTraces(picked, { floor: Number(r.floor), focusHint: text(r.focusHint || "", 200) });
+        ui.go("diary", "", { tab: "heart", replace: true });
+        return;
+      }
+      case "heart-followup": {
+        assert(ui.data, "先打开一个聊天");
+        const d = ui.data.diary.find((x) => x.id === value && x.kind === "heart");
+        assert(d, "未找到该条恋爱心迹");
+        const who = contactName(ui.data, d.author) !== "未知联系人" ? contactName(ui.data, d.author) : (d.authorName || "角色");
+        const prompt = await askText(ui, `回应 / 追问 ${who} 的心迹（#${(d.floor ?? 0) + 1}楼）`, "你想对 ta 的这段心迹说什么、追问什么，或做出什么小动作？", { placeholder: "例如：凑近盯着ta微红的耳尖问：「刚才明明在偷偷看我吧？」", max: 400 });
+        if (!prompt) return;
+        await engine.actions.heartFollowup(d.id, prompt);
+        return;
+      }
+      // ===== 全模块通用删除管理（多选删除 + 一键清空 + 单项删除） =====
+      case "batch-delete-modal": {
+        assert(ui.data, "先打开一个聊天");
+        const meta = tpModuleMeta(ui, value);
+        assert(meta && meta.items.length, "当前模块没有可删除的记录");
+        const snapNow = snapshot(ui);
+        const r = await ui.dialog(`多选删除 · ${meta.title}`, `${hint(meta.warn)}${pickTools()}${filterBox("搜索要删除的记录…")}${peopleChecks(meta.items, { name: "members", checked: [] })}`, { submit: "删除所选" });
+        if (!r) return;
+        const selected = Array.isArray(r.members) ? r.members : [];
+        assert(selected.length, "请至少勾选一条要删除的记录");
+        if (!await ui.confirm(`确认删除所选的 ${selected.length} 条${meta.title}？`, meta.warn + "此操作不可直接撤销。", "确认删除")) return;
+        still(ui, snapNow);
+        const idSet = new Set(selected);
+        if (value === "album") {
+          for (const p of ui.data.album.filter((x) => idSet.has(x.id))) {
+            if (p.mediaId && !String(p.mediaId).startsWith("url:")) await engine.media.remove?.(p.mediaId).catch(() => {});
+          }
+        }
+        let removedCount = 0;
+        await change(ui, (s) => {
+          const m2 = tpModuleMeta({ data: s }, value);
+          if (m2) removedCount = m2.remove(s, idSet);
+        }, `批量删除${meta.title}`, snapNow);
+        ui.notify(`已删除 ${removedCount} 条${meta.title}。`);
+        return;
+      }
+      case "clear-module": {
+        assert(ui.data, "先打开一个聊天");
+        const meta = tpModuleMeta(ui, value);
+        assert(meta && meta.items.length, "当前模块已经是空的");
+        const snapNow = snapshot(ui);
+        if (!await ui.confirm(`一键清空全部${meta.title}（共 ${meta.items.length} 条）？`, meta.warn + "清空后无法直接恢复，建议重要内容先备份。", "确认清空")) return;
+        still(ui, snapNow);
+        if (value === "album") {
+          for (const p of ui.data.album) {
+            if (p.mediaId && !String(p.mediaId).startsWith("url:")) await engine.media.remove?.(p.mediaId).catch(() => {});
+          }
+        }
+        let cleared = 0;
+        await change(ui, (s) => {
+          const m2 = tpModuleMeta({ data: s }, value);
+          if (m2) cleared = m2.clear(s);
+        }, `一键清空${meta.title}`, snapNow);
+        ui.notify(`已清空 ${cleared} 条${meta.title}。`);
+        return;
+      }
+      case "delete-diary": {
+        const snapNow = snapshot(ui), d = ui.data?.diary.find((x) => x.id === value);
+        assert(d, "记录不存在");
+        const label = d.kind === "heart" ? "恋爱心迹" : "日记";
+        if (await ui.confirm(`删除这篇${label}「${d.title}」？`, "删除后不可直接撤销。", "删除")) {
+          await change(ui, (s) => {
+            s.diary = s.diary.filter((x) => x.id !== value);
+          }, "删除" + label, snapNow);
+          ui.notify(`已删除${label}。`);
+        }
+        return;
+      }
+      case "delete-note": {
+        const snapNow = snapshot(ui), n = ui.data?.notes.find((x) => x.id === value);
+        assert(n, "便签不存在");
+        if (await ui.confirm(`删除便签「${n.title || "无题"}」？`, "删除后不可直接撤销。", "删除")) {
+          await change(ui, (s) => {
+            s.notes = s.notes.filter((x) => x.id !== value);
+          }, "删除便签", snapNow);
+          ui.notify("已删除便签。");
+        }
+        return;
+      }
+      case "delete-photo": {
+        const snapNow = snapshot(ui), p = ui.data?.album.find((x) => x.id === value);
+        assert(p, "照片不存在");
+        if (await ui.confirm(`移除照片「${p.title || "留影"}」？`, "将从手机相册中移除。", "移除")) {
+          if (p.mediaId && !String(p.mediaId).startsWith("url:")) await engine.media.remove?.(p.mediaId).catch(() => {});
+          await change(ui, (s) => {
+            s.album = s.album.filter((x) => x.id !== value);
+          }, "删除相册照片", snapNow);
+          ui.notify("已移除照片。");
+        }
+        return;
+      }
+      case "delete-chat-msg": {
+        const [tid, mid] = String(value).split("|");
+        const snapNow = snapshot(ui), t = ui.data?.threads.find((x) => x.id === tid);
+        const m = t?.messages.find((x) => x.id === mid);
+        assert(t && m, "消息不存在");
+        if (await ui.confirm("删除这条消息？", `「${text(m.text || "[图片]", 60)}」将被移除。`, "删除")) {
+          await change(ui, (s) => {
+            const th = s.threads.find((x) => x.id === tid);
+            if (th) th.messages = th.messages.filter((x) => x.id !== mid);
+          }, "删除单条消息", snapNow);
+        }
+        return;
+      }
+      case "delete-thread": {
+        const snapNow = snapshot(ui), t = ui.data?.threads.find((x) => x.id === value);
+        assert(t, "会话不存在");
+        if (await ui.confirm(`删除会话「${t.title}」？`, `将移除该会话内的 ${t.messages.length} 条消息与待发草稿。`, "删除")) {
+          await change(ui, (s) => {
+            s.threads = s.threads.filter((x) => x.id !== value);
+            s.summaries = s.summaries.filter((x) => x.threadId !== value);
+          }, "删除会话", snapNow);
+          ui.notify(`已删除会话「${t.title}」。`);
+        }
+        return;
+      }
+      case "delete-plan": {
+        const snapNow = snapshot(ui), p = ui.data?.plans.find((x) => x.id === value);
+        assert(p, "方向不存在");
+        if (await ui.confirm(`删除方向「${p.title}」？`, "将从候选与方向档案中移除。", "删除")) {
+          await change(ui, (s) => {
+            s.plans = s.plans.filter((x) => x.id !== value);
+            if (s.activePlan?.id === value) s.activePlan = null;
+          }, "删除未来方向", snapNow);
+          ui.notify("已删除该方向。");
+        }
+        return;
+      }
       case "read-narrative":
         await change(ui, (s) => {
           s.settings.readNarrative = !s.settings.readNarrative;
@@ -6282,7 +7491,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
     const o = ui.data.arc.outline;
     if (!o.beats.length) return empty("还没有剧情大纲", "“面”是数周到数月的阶段走向；生成后会随正文自动判定推进。", "plane") + button(icon("spark", 15) + " 生成大纲", "arc-outline-gen", "", "primary wide") + button("三层一起生成", "arc-run", "", "wide");
     const n = o.beats.length;
-    return `<div class="card arc-progress"><div class="row-top"><b>当前 ${o.cursor + 1} / ${n}</b><small>${e(o.judge.verdict || "")}${o.judge.at ? " · " + arcWhen(o.judge.at) : ""}</small></div><div class="arc-bar"><i style="width:${Math.round((o.cursor + 1) / n * 100)}%"></i></div>${o.judge.note ? `<p class="tiny muted">${e(o.judge.note)}</p>` : ""}</div><div class="arc-timeline">${o.beats.map((b, i) => arcBeatHtml(b, i, o.cursor)).join("")}</div><div class="buttons">${button("重新生成大纲", "arc-outline-gen")}${button("让AI重新定位", "arc-relocate")}${button(icon("plus", 13) + " 添加节点", "arc-beat-add")}${button("清空大纲", "arc-outline-clear", "", "danger")}</div>${hint("面只判定“故事走到了哪一步”，不会替你演出下一步。推进必须引用正文原句，找不到依据就不推进。")}`;
+    return `<div class="card arc-progress"><div class="row-top"><b>当前 ${o.cursor + 1} / ${n}</b><small>${e(o.judge.verdict || "")}${o.judge.at ? " · " + arcWhen(o.judge.at) : ""}</small></div><div class="arc-bar"><i style="width:${Math.round((o.cursor + 1) / n * 100)}%"></i></div>${o.judge.note ? `<p class="tiny muted">${e(o.judge.note)}</p>` : ""}</div>${tpDeleteBar("arc_beats", n, "大纲节点")}<div class="arc-timeline">${o.beats.map((b, i) => arcBeatHtml(b, i, o.cursor)).join("")}</div><div class="buttons">${button("重新生成大纲", "arc-outline-gen")}${button("让AI重新定位", "arc-relocate")}${button(icon("plus", 13) + " 添加节点", "arc-beat-add")}${button("清空大纲", "arc-outline-clear", "", "danger")}</div>${hint("面只判定“故事走到了哪一步”，不会替你演出下一步。推进必须引用正文原句，找不到依据就不推进。")}`;
   }
   function arcLineHtml(l) {
     const idx = ARC_STAGES.indexOf(l.stage);
@@ -6290,7 +7499,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   }
   function arcLineView(ui) {
     const arc = ui.data.arc, act = arcActiveLines(arc), done = arc.lines.items.filter(arcTerminal);
-    return `<div class="segmented arc-dirs">${Object.entries(ARC_DIRECTIONS).map(([k, label]) => `<button class="${arc.lines.direction === k ? "active" : ""}" data-action="arc-dir" data-id="${k}">${label}</button>`).join("")}</div>${hint("倾向只在同样有依据的走向之间调整优先级，不改写既有事实。")}<div class="buttons">${button(icon("spark", 14) + (act.length ? " 推进事件线" : " 生成事件线"), "arc-lines-run", "", "primary")}${button(icon("plus", 13) + " 新增一条线", "arc-line-add")}</div>${act.length ? act.map(arcLineHtml).join("") : empty("还没有事件线", "“线”是同时推进的关系线、事务线、势力线；世界不会因为玩家没参与就停滞。", "line")}${done.length ? `<details class="details"><summary>已收束 / 淡出（${done.length}）</summary>${done.map(arcLineHtml).join("")}</details>` : ""}`;
+    return `<div class="segmented arc-dirs">${Object.entries(ARC_DIRECTIONS).map(([k, label]) => `<button class="${arc.lines.direction === k ? "active" : ""}" data-action="arc-dir" data-id="${k}">${label}</button>`).join("")}</div>${hint("倾向只在同样有依据的走向之间调整优先级，不改写既有事实。")}<div class="buttons">${button(icon("spark", 14) + (act.length ? " 推进事件线" : " 生成事件线"), "arc-lines-run", "", "primary")}${button(icon("plus", 13) + " 新增一条线", "arc-line-add")}</div>${arc.lines.items.length ? tpDeleteBar("arc_lines", arc.lines.items.length, "事件线") : ""}${act.length ? act.map(arcLineHtml).join("") : empty("还没有事件线", "“线”是同时推进的关系线、事务线、势力线；世界不会因为玩家没参与就停滞。", "line")}${done.length ? `<details class="details"><summary>已收束 / 淡出（${done.length}）</summary>${done.map(arcLineHtml).join("")}</details>` : ""}`;
   }
   function arcEventHtml(ev, { archived = false } = {}) {
     const kind = ev.type === "hidden" ? "gold" : ev.type === "bond" ? "rose" : "";
@@ -6298,7 +7507,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   }
   function arcPointView(ui) {
     const s = ui.data, P = s.arc.points, world = storyFor(s, ui.snapshot);
-    return `${hint(world.date ? `Day 1 = 剧情当前日期 ${world.date} ${dayLabel(world.date)}；剧情日期推进时会自动顺延，过去的事项收入“已过去”。` : "主线还没有提供剧情日期：日程只按“第几天”排列，无法随日期自动顺延；可在日历页设置备用剧情日期。", !world.date)}${P.stale ? hint("日期已推进，日程需要补足；开启自动推进后会在下一次回复后更新，也可以现在手动刷新。") : ""}<div class="buttons">${button(icon("spark", 14) + (P.days.length ? " 刷新日程" : " 生成日程"), "arc-points-run", "", "primary")}${button(icon("plus", 13) + " 手动添加", "arc-pt-add")}</div>${P.days.length ? P.days.map((d) => `<div class="arc-day"><div class="arc-day-head"><b>Day ${d.n}</b><span>${e(d.date ? d.date + " " + dayLabel(d.date) : "第 " + d.n + " 天")}</span>${d.weather ? `<i>${icon(/雨|雪|雾|阴/.test(d.weather) ? "cloud" : "sun", 13)} ${e(d.weather)}${d.temp ? " " + e(d.temp) : ""}</i>` : ""}</div>${d.events.length ? d.events.map((ev) => arcEventHtml(ev)).join("") : `<p class="tiny muted arc-day-empty">这一天还很宽敞。</p>`}</div>`).join("") : empty("还没有日程", "“点”是未来三天的具体安排与更远的候选事件。", "point")}${P.future.length ? section("更远的可能", P.future.map((ev) => arcEventHtml(ev)).join("")) : ""}${P.past.length ? `<details class="details"><summary>已过去 / 已发生（${P.past.length}）</summary>${[...P.past].reverse().slice(0, 30).map((ev) => arcEventHtml(ev, { archived: true })).join("")}</details>` : ""}`;
+    return `${hint(world.date ? `Day 1 = 剧情当前日期 ${world.date} ${dayLabel(world.date)}；剧情日期推进时会自动顺延，过去的事项收入“已过去”。` : "主线还没有提供剧情日期：日程只按“第几天”排列，无法随日期自动顺延；可在日历页设置备用剧情日期。", !world.date)}${P.stale ? hint("日期已推进，日程需要补足；开启自动推进后会在下一次回复后更新，也可以现在手动刷新。") : ""}<div class="buttons">${button(icon("spark", 14) + (P.days.length ? " 刷新日程" : " 生成日程"), "arc-points-run", "", "primary")}${button(icon("plus", 13) + " 手动添加", "arc-pt-add")}</div>${(P.days.reduce((n, x) => n + x.events.length, 0) + P.future.length + P.past.length) ? tpDeleteBar("arc_points", P.days.reduce((n, x) => n + x.events.length, 0) + P.future.length + P.past.length, "日程点") : ""}${P.days.length ? P.days.map((d) => `<div class="arc-day"><div class="arc-day-head"><b>Day ${d.n}</b><span>${e(d.date ? d.date + " " + dayLabel(d.date) : "第 " + d.n + " 天")}</span>${d.weather ? `<i>${icon(/雨|雪|雾|阴/.test(d.weather) ? "cloud" : "sun", 13)} ${e(d.weather)}${d.temp ? " " + e(d.temp) : ""}</i>` : ""}</div>${d.events.length ? d.events.map((ev) => arcEventHtml(ev)).join("") : `<p class="tiny muted arc-day-empty">这一天还很宽敞。</p>`}</div>`).join("") : empty("还没有日程", "“点”是未来三天的具体安排与更远的候选事件。", "point")}${P.future.length ? section("更远的可能", P.future.map((ev) => arcEventHtml(ev)).join("")) : ""}${P.past.length ? `<details class="details"><summary>已过去 / 已发生（${P.past.length}）</summary>${[...P.past].reverse().slice(0, 30).map((ev) => arcEventHtml(ev, { archived: true })).join("")}</details>` : ""}`;
   }
   function arcPlanView(ui) {
     const s = ui.data, arc = s.arc, tab = ui.arcTab || "plane", legacy = s.plans.length;
@@ -6595,11 +7804,11 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   // src/ui/views-planner.js
   function plannerView(ui) {
     const s = ui.data, active = s.activePlan ? s.plans.find((p) => p.id === s.activePlan.id) : null, rows = [...s.plans].reverse();
-    return `<div class="pad"><div class="eyebrow">A LITTLE ROOM FOR TOMORROW</div><h2 style="font-size:24px;margin:5px 0 7px;letter-spacing:1px">给未来，留一点余地。</h2><p class="muted tiny" style="margin-bottom:15px">方向可以提前准备，故事仍由你亲自经历。</p><div class="segmented"><button class="${s.settings.planningMode === "manual" ? "active" : ""}" data-action="plan-mode" data-id="manual">${icon("people", 14)} 我来选择</button><button class="${s.settings.planningMode === "auto" ? "active" : ""}" data-action="plan-mode" data-id="auto">${icon("spark", 14)} 自动选方向</button></div>${hint(s.settings.planningMode === "auto" ? "自动模式：没有正在采用的方向时，后台从新候选中选择；隐藏注入正文，不列出规划清单，也不替你执行。" : "手动模式：后台准备候选，你选择之后才引导正文。未选择的方向不作为已经发生的经历。")}${!s.settings.auto.enabled ? '<button class="tap-text" data-action="go" data-id="automation">后台目前关闭 · 点此设置自动任务</button>' : ""}${arcLegacyExtra(ui)}${button(icon("spark", 15) + " 生成新的未来方向", "generate-plan", "", "primary wide")}${active ? section("正在沿着这条方向", planCard(ui, active, true)) : ""}${section("候选与方向档案", rows.filter((p) => p.id !== active?.id).length ? rows.filter((p) => p.id !== active?.id).map((p) => planCard(ui, p, false)).join("") : empty("故事还没决定下一页", "可以现在生成，或开启后台，让新方向慢慢出现。", "compass"))}</div>`;
+    return `<div class="pad"><div class="eyebrow">A LITTLE ROOM FOR TOMORROW</div><h2 style="font-size:24px;margin:5px 0 7px;letter-spacing:1px">给未来，留一点余地。</h2><p class="muted tiny" style="margin-bottom:15px">方向可以提前准备，故事仍由你亲自经历。</p><div class="segmented"><button class="${s.settings.planningMode === "manual" ? "active" : ""}" data-action="plan-mode" data-id="manual">${icon("people", 14)} 我来选择</button><button class="${s.settings.planningMode === "auto" ? "active" : ""}" data-action="plan-mode" data-id="auto">${icon("spark", 14)} 自动选方向</button></div>${hint(s.settings.planningMode === "auto" ? "自动模式：没有正在采用的方向时，后台从新候选中选择；隐藏注入正文，不列出规划清单，也不替你执行。" : "手动模式：后台准备候选，你选择之后才引导正文。未选择的方向不作为已经发生的经历。")}${!s.settings.auto.enabled ? '<button class="tap-text" data-action="go" data-id="automation">后台目前关闭 · 点此设置自动任务</button>' : ""}${arcLegacyExtra(ui)}${button(icon("spark", 15) + " 生成新的未来方向", "generate-plan", "", "primary wide")}${s.plans.length ? tpDeleteBar("plans", s.plans.length, "方向") : ""}${active ? section("正在沿着这条方向", planCard(ui, active, true)) : ""}${section("候选与方向档案", rows.filter((p) => p.id !== active?.id).length ? rows.filter((p) => p.id !== active?.id).map((p) => planCard(ui, p, false)).join("") : empty("故事还没决定下一页", "可以现在生成，或开启后台，让新方向慢慢出现。", "compass"))}</div>`;
   }
   function planCard(ui, p, active) {
     const s = ui.data;
-    return `<article class="card plan-card"><div class="plan-number">${e(p.tone || "日常")} · ${p.beats.length} 个留白的片段 ${active ? tag("已采用") : tag({ candidate: "待选择", paused: "已暂停", completed: "已收束", cancelled: "已取消" }[p.status] || p.status)}</div><h3 class="plan-title">${e(p.title)}</h3><p class="muted">${e(p.summary)}</p><div class="plan-members">${p.members.slice(0, 4).map((id2) => avatar(s.contacts.find((c) => c.id === id2), "small")).join("")}<span>${p.members.length ? e(p.members.map((id2) => contactName(s, id2)).join("、")) : "独自的小安排"}</span></div><div class="buttons">${button("看看这条方向 " + icon("arrow", 13), "plan-detail", p.id, active ? "primary" : "")}${!active && ["candidate", "paused"].includes(p.status) ? button("采用", "adopt-plan", p.id, "primary") : ""}</div></article>`;
+    return `<article class="card plan-card"><div class="plan-number">${e(p.tone || "日常")} · ${p.beats.length} 个留白的片段 ${active ? tag("已采用") : tag({ candidate: "待选择", paused: "已暂停", completed: "已收束", cancelled: "已取消" }[p.status] || p.status)}</div><h3 class="plan-title">${e(p.title)}</h3><p class="muted">${e(p.summary)}</p><div class="plan-members">${p.members.slice(0, 4).map((id2) => avatar(s.contacts.find((c) => c.id === id2), "small")).join("")}<span>${p.members.length ? e(p.members.map((id2) => contactName(s, id2)).join("、")) : "独自的小安排"}</span></div><div class="buttons">${button("看看这条方向 " + icon("arrow", 13), "plan-detail", p.id, active ? "primary" : "")}${!active && ["candidate", "paused"].includes(p.status) ? button("采用", "adopt-plan", p.id, "primary") : ""}${button("删除", "delete-plan", p.id, "danger")}</div></article>`;
   }
   function planDetailView(ui) {
     const s = ui.data, p = s.plans.find((p2) => p2.id === ui.route.id);
@@ -6620,11 +7829,11 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
     const plans = s.plans.filter((p) => p.status === "active" && p.baseDate).flatMap((p) => p.beats.filter((b) => addDays(p.baseDate, b.day) === selected).map((b) => ({ p, b })));
     const upcoming = s.agenda.filter((a) => a.date && a.date > selected && a.date <= addDays(selected, 30) && a.status !== "cancelled").sort((a, b) => a.date.localeCompare(b.date) || (a.time || "").localeCompare(b.time || "")).slice(0, 14);
     const statusTag = (a) => a.status === "event" ? tag(a.kind || "活动", a.kind === "节气" ? "" : a.kind === "校园" ? "rose" : "gold") : tag({ proposed: "待商量", confirmed: "已确认", completed: "已完成", cancelled: "已取消" }[a.status] || a.status) + (a.kind && a.kind !== "约定" ? tag(a.kind, "gold") : "");
-    const card = (a, showDate) => `<div class="card"><div class="row-top">${statusTag(a)}<small>${showDate ? e(a.date + " " + dayLabel(a.date)) + " · " : ""}${e(a.time || "时间未定")}</small></div><h3 style="margin-top:7px">${e(a.title)}</h3><p class="muted tiny">${e(a.note || "没有额外说明")}</p>${(a.members || []).length ? `<p class="tiny muted" style="margin-top:4px">相关：${e(a.members.map((m) => contactName(s, m)).join("、"))}</p>` : ""}<div class="buttons">${a.status === "event" ? button("想一起去", "agenda-intent", a.id, "primary") + button("记为待商量", "agenda-propose", a.id) : ""}${a.status === "proposed" ? button("确认约定", "agenda-confirm", a.id) : ""}${a.status === "confirmed" ? button("确实完成了", "agenda-done", a.id) : ""}${["proposed", "confirmed"].includes(a.status) ? button("取消", "agenda-cancel", a.id) : ""}${["event", "cancelled", "completed"].includes(a.status) ? button("移除", "agenda-delete", a.id, "ghost") : ""}</div></div>`;
+    const card = (a, showDate) => `<div class="card"><div class="row-top">${statusTag(a)}<small>${showDate ? e(a.date + " " + dayLabel(a.date)) + " · " : ""}${e(a.time || "时间未定")}</small></div><h3 style="margin-top:7px">${e(a.title)}</h3><p class="muted tiny">${e(a.note || "没有额外说明")}</p>${(a.members || []).length ? `<p class="tiny muted" style="margin-top:4px">相关：${e(a.members.map((m) => contactName(s, m)).join("、"))}</p>` : ""}<div class="buttons">${a.status === "event" ? button("想一起去", "agenda-intent", a.id, "primary") + button("记为待商量", "agenda-propose", a.id) : ""}${a.status === "proposed" ? button("确认约定", "agenda-confirm", a.id) : ""}${a.status === "confirmed" ? button("确实完成了", "agenda-done", a.id) : ""}${["proposed", "confirmed"].includes(a.status) ? button("取消", "agenda-cancel", a.id) : ""}${button("删除", "agenda-delete", a.id, "danger")}</div></div>`;
     return `<div class="pad"><div class="eyebrow">${world.date ? "STORY TIME · " + e(world.origin) : "设备日历视图 · 非剧情日期"}</div><h2 class="weekday-title" style="margin-top:6px">${e(selected)} <small>${e(dayLabel(selected))}</small></h2><div class="month-head"><button class="chip" data-action="agenda-month" data-id="${month - 1}">‹ 上月</button><b>${e(mStart.slice(0, 4))}年${Number(mStart.slice(5, 7))}月</b><button class="chip" data-action="agenda-month" data-id="${month + 1}">下月 ›</button></div><div class="week-nav" style="justify-content:center">${month ? `<button class="chip active" data-action="agenda-month" data-id="0">回到剧情当月</button>` : ""}</div><div class="calendar-month">${["日", "一", "二", "三", "四", "五", "六"].map((w) => `<span class="wk">${w}</span>`).join("")}${Array.from({ length: new Date(mStart + "T00:00:00Z").getUTCDay() }, () => `<span class="mday blank"></span>`).join("")}${Array.from({ length: monthDays(mStart) }, (_, i) => {
       const d = addDays(mStart, i), list = s.agenda.filter((a) => a.date === d && a.status !== "cancelled"), fest = list.some((a) => a.status === "event"), n = list.length + arcDayEvents(s, d).length;
       return `<button class="mday ${d === selected ? "selected" : ""} ${d === today ? "today" : ""}" data-action="agenda-day" data-id="${d}" aria-label="${d}"><b>${i + 1}</b><i class="${fest ? "fest" : n ? "has" : ""}"></i></button>`;
-    }).join("")}</div>${!world.date ? hint("主线还没有提供日期。可手动设置剧情日期；这里只显示设备日历作为浏览导航，不自动推进剧情。", true) : ""}<div class="buttons">${button(icon("spark", 14) + " 一键生成本月节日", "gen-festivals", mStart, "primary")}${button(icon("plus", 14) + " 新建约定", "new-agenda")}${button("剧情日期", "story-date")}</div><p class="tiny muted" style="margin-top:6px">一键生成：为当前显示的整个月份生成风俗、庆典、节气、游玩、校园活动，以及已知人物可能提出的邀约（只是待商量）。接口不可用时自动改用本卡内置节庆表。</p>${section("这一天", rows.length ? rows.map((a) => card(a, false)).join("") : empty("这一天还很宽敞", "没有安排，也是一种安排。", "calendar"))}${arcCalendarHtml(s, selected)}${plans.length ? section("方向里的建议 · 非正式约定", plans.map(({ p, b }) => `<button class="card" style="display:block;width:100%;text-align:left" data-action="plan-detail" data-id="${e(p.id)}">${tag("未执行计划", "gold")}<h3 style="margin-top:7px">${e(b.title)}</h3><p class="muted tiny">${e(b.scene)}</p></button>`).join("")) : ""}${upcoming.length ? section("接下来 30 天", upcoming.map((a) => card(a, true)).join("")) : ""}</div>`;
+    }).join("")}</div>${!world.date ? hint("主线还没有提供日期。可手动设置剧情日期；这里只显示设备日历作为浏览导航，不自动推进剧情。", true) : ""}<div class="buttons">${button(icon("spark", 14) + " 一键生成本月节日", "gen-festivals", mStart, "primary")}${button(icon("plus", 14) + " 新建约定", "new-agenda")}${button("剧情日期", "story-date")}</div>${s.agenda.length ? tpDeleteBar("agenda", s.agenda.length, "日程与约定") : ""}<p class="tiny muted" style="margin-top:6px">一键生成：为当前显示的整个月份生成风俗、庆典、节气、游玩、校园活动，以及已知人物可能提出的邀约（只是待商量）。接口不可用时自动改用本卡内置节庆表。</p>${section("这一天", rows.length ? rows.map((a) => card(a, false)).join("") : empty("这一天还很宽敞", "没有安排，也是一种安排。", "calendar"))}${arcCalendarHtml(s, selected)}${plans.length ? section("方向里的建议 · 非正式约定", plans.map(({ p, b }) => `<button class="card" style="display:block;width:100%;text-align:left" data-action="plan-detail" data-id="${e(p.id)}">${tag("未执行计划", "gold")}<h3 style="margin-top:7px">${e(b.title)}</h3><p class="muted tiny">${e(b.scene)}</p></button>`).join("")) : ""}${upcoming.length ? section("接下来 30 天", upcoming.map((a) => card(a, true)).join("")) : ""}</div>`;
   }
   var KIND_LABEL = { phone_fact: "交流事实", narrative_fact: "正文事实", promise: "未完约定", manual: "手工记录" };
   var clock = (ts) => ts ? new Date(ts).toLocaleString("zh-CN", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "尚未同步";
@@ -6640,33 +7849,54 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   }
   function memoryView(ui) {
     const s = ui.data;
-    return `<div class="pad"><div class="mini-stat">${icon("memory", 28)}<strong>${s.memories.length}</strong><span>条有范围的记忆<br>${s.summaries.length} 份会话摘要</span></div>${bookCard(ui)}${baibaiMemoryCard()}${hint("原文、来源、知情者分别保留。邀请不是已经发生的行动；私人经历不会自动广播给其他角色。")}<div class="buttons">${button("整理新的交流", "summarize", "", "primary")}${button("查看正文注入", "inspect-injection")}${button(icon("plus", 14) + " 新增记忆", "new-memory")}</div>${section("明确记录的事", s.memories.length ? [...s.memories].reverse().map((m) => memoryCard(ui, m)).join("") : empty("还没有需要特别记下的事", "可以手动新增，或点“AI 生成记忆”从正文里提炼；摘要只是长线辅助。", "book"))}${s.summaries.length ? section("滚动摘要", s.summaries.slice(-8).reverse().map((m) => `<details class="details"><summary>${e(s.threads.find((t) => t.id === m.threadId)?.title || "旧会话")} · 摘要</summary><p>${e(m.text)}</p></details>`).join("")) : ""}</div>`;
+    return `<div class="pad"><div class="mini-stat">${icon("memory", 28)}<strong>${s.memories.length}</strong><span>条有范围的记忆<br>${s.summaries.length} 份会话摘要</span></div>${bookCard(ui)}${baibaiMemoryCard()}${hint("原文、来源、知情者分别保留。邀请不是已经发生的行动；私人经历不会自动广播给其他角色。")}<div class="buttons">${button("整理新的交流", "summarize", "", "primary")}${button("查看正文注入", "inspect-injection")}${button(icon("plus", 14) + " 新增记忆", "new-memory")}</div>${s.memories.length ? tpDeleteBar("memories", s.memories.length, "记忆") : ""}${section("明确记录的事", s.memories.length ? [...s.memories].reverse().map((m) => memoryCard(ui, m)).join("") : empty("还没有需要特别记下的事", "可以手动新增，或点“AI 生成记忆”从正文里提炼；摘要只是长线辅助。", "book"))}${s.summaries.length ? section("滚动摘要", s.summaries.slice(-8).reverse().map((m) => `<details class="details"><summary>${e(s.threads.find((t) => t.id === m.threadId)?.title || "旧会话")} · 摘要</summary><p>${e(m.text)}</p></details>`).join("")) : ""}</div>`;
   }
 
   // src/ui/views-life.js
   function lifeView(ui) {
     const s = ui.data;
     const tasks = s.tasks, done = tasks.filter((t) => t.done).length;
-    return `<div class="pad"><div class="eyebrow">LIFE IS IN THE LITTLE THINGS</div><h2 style="font-size:24px;margin:6px 0 12px">把小事，过得认真。</h2><div class="mini-stat">${icon("coffee", 28)}<strong>${done}<small> / ${tasks.length}</small></strong><span>已经记下的心愿<br>不把日常变成刷分游戏</span></div><div class="buttons">${button(icon("spark", 14) + " 生成清单…", "auto-tasks", "", "primary")}${button(icon("plus", 14) + " 新心愿 / 项目", "new-task")}${button(icon("bag", 14) + " 随身物品", "go", "bag")}${button(icon("coffee", 14) + " 店务工具", "cafe-tools")}</div>${section("慢慢完成", tasks.length ? `<div class="card">${tasks.map((t) => `<div class="task-row ${t.done ? "is-done" : ""}"><button class="task-check ${t.done ? "done" : ""}" data-action="task-progress" data-id="${e(t.id)}" aria-label="记录进度">${t.done ? icon("check", 15) : ""}</button><div class="task-text"><b>${e(t.title)}</b><small>${e(t.category || "生活")} · ${t.progress || 0}/${t.target || 1}${t.source && /^(正文生成|人物生成)/.test(t.source) ? " · " + e(t.source) : ""}${t.people?.length ? "<br>关于：" + e(t.people.map((id2) => contactName(s, id2)).join("、")) : ""}</small>${(t.target || 1) > 1 ? `<div class="progress"><i style="width:${Math.min(100, (t.progress || 0) / (t.target || 1) * 100)}%"></i></div>` : ""}</div><button class="icon-btn" data-action="task-delete" data-id="${e(t.id)}" aria-label="移除此项">${icon("more", 15)}</button></div>`).join("")}</div>` : empty("先选一件想做的小事", "也可以点“生成清单…”：按正文整理，或选几位角色各出几条。", "coffee"))}${hint("手机清单是记录，不会自动扣费、加好感或完成正文任务。店务工具仅在兼容卡的实际场景下记账。")}</div>`;
+    return `<div class="pad"><div class="eyebrow">LIFE IS IN THE LITTLE THINGS</div><h2 style="font-size:24px;margin:6px 0 12px">把小事，过得认真。</h2><div class="mini-stat">${icon("coffee", 28)}<strong>${done}<small> / ${tasks.length}</small></strong><span>已经记下的心愿<br>不把日常变成刷分游戏</span></div><div class="buttons">${button(icon("spark", 14) + " 生成清单…", "auto-tasks", "", "primary")}${button(icon("plus", 14) + " 新心愿 / 项目", "new-task")}${button(icon("bag", 14) + " 随身物品", "go", "bag")}${button(icon("coffee", 14) + " 店务工具", "cafe-tools")}</div>${tasks.length ? tpDeleteBar("tasks", tasks.length, "清单") : ""}${section("慢慢完成", tasks.length ? `<div class="card">${tasks.map((t) => `<div class="task-row ${t.done ? "is-done" : ""}"><button class="task-check ${t.done ? "done" : ""}" data-action="task-progress" data-id="${e(t.id)}" aria-label="记录进度">${t.done ? icon("check", 15) : ""}</button><div class="task-text"><b>${e(t.title)}</b><small>${e(t.category || "生活")} · ${t.progress || 0}/${t.target || 1}${t.source && /^(正文生成|人物生成)/.test(t.source) ? " · " + e(t.source) : ""}${t.people?.length ? "<br>关于：" + e(t.people.map((id2) => contactName(s, id2)).join("、")) : ""}</small>${(t.target || 1) > 1 ? `<div class="progress"><i style="width:${Math.min(100, (t.progress || 0) / (t.target || 1) * 100)}%"></i></div>` : ""}</div><button class="icon-btn" data-action="task-delete" data-id="${e(t.id)}" aria-label="移除此项">${icon("more", 15)}</button></div>`).join("")}</div>` : empty("先选一件想做的小事", "也可以点“生成清单…”：按正文整理，或选几位角色各出几条。", "coffee"))}${hint("手机清单是记录，不会自动扣费、加好感或完成正文任务。店务工具仅在兼容卡的实际场景下记账。")}</div>`;
   }
   function notesView(ui) {
     const rows = ui.data.notes;
-    return `<div class="pad"><div class="buttons" style="margin:0 0 15px">${button(icon("spark", 14) + " 生成备忘…", "auto-notes", "", "primary")}${button(icon("plus", 14) + " 写一张便签", "new-note")}</div>${rows.length ? `<div class="note-grid">${[...rows].reverse().map((n) => `<button class="note-card" data-action="edit-note" data-id="${e(n.id)}"><h3>${e(n.title || "无题")}</h3><p>${e(n.text)}</p><small>${e(new Date(n.ts).toLocaleDateString("zh-CN"))}${n.source === "正文生成" ? " · 自动" : n.source === "人物生成" ? " · 人物" : ""}${n.people?.length ? " · " + e(n.people.map((id2) => contactName(ui.data, id2)).join("、")) : ""}</small></button>`).join("")}</div>` : empty("留一句给未来的自己", "也可以让手机从最近的正文里整理，或选几位角色各记几张。", "note")}</div>`;
+    return `<div class="pad"><div class="buttons" style="margin:0 0 10px">${button(icon("spark", 14) + " 生成备忘…", "auto-notes", "", "primary")}${button(icon("plus", 14) + " 写一张便签", "new-note")}</div>${rows.length ? tpDeleteBar("notes", rows.length, "便签") : ""}${rows.length ? `<div class="note-grid">${[...rows].reverse().map((n) => `<div class="note-card tp-note-wrap"><button type="button" class="tp-note-main" data-action="edit-note" data-id="${e(n.id)}"><h3>${e(n.title || "无题")}</h3><p>${e(n.text)}</p><small>${e(new Date(n.ts).toLocaleDateString("zh-CN"))}${n.source === "正文生成" ? " · 自动" : n.source === "人物生成" ? " · 人物" : ""}${n.people?.length ? " · " + e(n.people.map((id2) => contactName(ui.data, id2)).join("、")) : ""}</small></button><button type="button" class="icon-btn tp-note-del" data-action="delete-note" data-id="${e(n.id)}" aria-label="删除便签" title="删除便签">${icon("trash", 13)}</button></div>`).join("")}</div>` : empty("留一句给未来的自己", "也可以让手机从最近的正文里整理，或选几位角色各记几张。", "note")}</div>`;
   }
   function diaryView(ui) {
-    const s = ui.data, filter = ui.route.author || "all";
-    const authors = [...new Set(s.diary.map((d) => d.author || "user"))];
-    const rows = [...s.diary].reverse().filter((d) => filter === "all" || (d.author || "user") === filter);
-    const who = (d) => !d.author || d.author === "user" ? "我" : contactName(s, d.author);
-    return `<div class="pad">${hint("可以指定角色，也可以随机抽几位角色，各写一篇自己的日记。每人只写本人知道的事；AI先写草稿，你确认后保存。")}<div class="buttons">${button(icon("spark", 14) + " 生成角色日记", "generate-diary", "", "primary")}${button(icon("people", 14) + " 随机 3 位", "random-diary")}${button(icon("edit", 14) + " 自己写", "new-diary")}</div>${authors.length > 1 ? `<div class="subnav" style="padding:12px 0 0"><button class="chip ${filter === "all" ? "active" : ""}" data-action="diary-filter" data-id="all">全部</button>${authors.map((a) => `<button class="chip ${filter === a ? "active" : ""}" data-action="diary-filter" data-id="${e(a)}">${e(a === "user" ? "我" : contactName(s, a))}</button>`).join("")}</div>` : ""}${section("留下来的日子", rows.length ? rows.map((d) => `<button class="card" style="display:block;width:100%;text-align:left" data-action="edit-diary" data-id="${e(d.id)}"><div class="eyebrow">${e(who(d))} · ${e(d.date || "未注明日期")} ${d.mood ? tag(d.mood, "rose") : ""}${d.status === "draft" ? tag("草稿", "gold") : tag("已确认")}</div><h3 style="margin-top:8px">${e(d.title)}</h3><p class="muted tiny">${e(d.text.slice(0, 130))}${d.text.length > 130 ? "…" : ""}</p></button>`).join("") : empty("还没有写下今天", "普通的一天，也值得留下几行。", "book"))}</div>`;
+    const s = ui.data, tab = ui.route.tab || "all", filter = ui.route.author || "all", floorFilter = ui.route.floor || "all";
+    const hearts = s.diary.filter((d) => d.kind === "heart");
+    const diaries = s.diary.filter((d) => d.kind !== "heart");
+    const basePool = tab === "heart" ? hearts : tab === "diary" ? diaries : s.diary;
+    const authors = [...new Set(basePool.map((d) => d.author || "user"))];
+    const heartFloors = [...new Set(hearts.map((d) => Number.isInteger(d.floor) ? d.floor : 0))].sort((a, b) => b - a);
+    const rows = [...basePool].reverse().filter((d) => {
+      if (filter !== "all" && (d.author || "user") !== filter) return false;
+      if (tab === "heart" && floorFilter !== "all" && String(d.floor ?? 0) !== String(floorFilter)) return false;
+      return true;
+    });
+    const delModule = tab === "heart" ? "heart" : tab === "diary" ? "diary" : "diary_all";
+    const delLabel = tab === "heart" ? "恋爱心迹" : tab === "diary" ? "角色日记" : "日记与心迹";
+    return `<div class="pad">
+      <div class="segmented" style="margin-bottom:12px">
+        <button class="${tab === "all" ? "active" : ""}" data-action="diary-tab" data-id="all">${icon("book", 13)} 全部 (${s.diary.length})</button>
+        <button class="${tab === "heart" ? "active" : ""}" data-action="diary-tab" data-id="heart">${icon("heart", 13)} 恋爱心迹 (${hearts.length})</button>
+        <button class="${tab === "diary" ? "active" : ""}" data-action="diary-tab" data-id="diary">${icon("edit", 13)} 角色日记 (${diaries.length})</button>
+      </div>
+      ${tab !== "diary" ? renderHeartTracePanel(ui) : ""}
+      ${tab !== "heart" ? `<div class="card" style="margin-bottom:10px"><div class="row-top"><b>角色与玩家日记</b><small class="muted">每人只写本人知道的事</small></div><div class="buttons" style="margin-top:8px">${button(icon("spark", 14) + " 生成角色日记", "generate-diary", "", "primary")}${button(icon("people", 14) + " 随机 3 位", "random-diary")}${button(icon("edit", 14) + " 自己写", "new-diary")}</div></div>` : ""}
+      ${authors.length > 1 ? `<div class="subnav" style="padding:6px 0 0"><button class="chip ${filter === "all" ? "active" : ""}" data-action="diary-filter" data-id="all">全部角色</button>${authors.map((a) => `<button class="chip ${filter === a ? "active" : ""}" data-action="diary-filter" data-id="${e(a)}">${e(a === "user" ? "我" : contactName(s, a))}</button>`).join("")}</div>` : ""}
+      ${tab === "heart" && heartFloors.length > 1 ? `<div class="subnav" style="padding:6px 0 0"><button class="chip ${floorFilter === "all" ? "active" : ""}" data-action="diary-floor" data-id="all">全部楼层</button>${heartFloors.slice(0, 12).map((fl) => `<button class="chip ${String(floorFilter) === String(fl) ? "active" : ""}" data-action="diary-floor" data-id="${fl}">#${fl + 1}楼</button>`).join("")}</div>` : ""}
+      ${basePool.length ? tpDeleteBar(delModule, basePool.length, delLabel) : ""}
+      ${section(tab === "heart" ? "每楼层恋爱心迹" : tab === "diary" ? "留下来的日子" : "心迹与日记档案", rows.length ? rows.map((d) => renderDiaryEntryCard(ui, d)).join("") : empty(tab === "heart" ? "还没有记录下心迹" : "还没有写下今天", tab === "heart" ? "点上方“一键生成本楼心迹”，或开启每楼层自动生成，聆听角色在每层正文背后的悸动与潜台词。" : "普通的一天，也值得留下几行。", tab === "heart" ? "heart" : "book"))}
+    </div>`;
   }
   function bagView(ui) {
     const s = ui.data, canonical = ui.snapshot.stat?.背包 || {};
-    return `<div class="pad">${hint("主线物品来自角色卡变量；手机附注另存，不擅自修改真实物品数量。")}${Object.keys(canonical).length ? section("主线背包（只读）", Object.entries(canonical).map(([name, x]) => `<div class="card"><h3>${e(name)} ${tag("× " + (x.数量 ?? 1))}</h3><p class="muted tiny">${e(x.描述 || "")}</p><small>${e([x.获得时间, x.获得地点].filter(Boolean).join(" · "))}</small></div>`).join("")) : ""}<div class="buttons">${button(icon("plus", 14) + " 添加手机物品记录", "new-item", "", "primary")}</div>${section("手机记录与备注", s.items.length ? s.items.map((x) => `<div class="card"><h3>${e(x.title)} ${tag("× " + x.quantity)}</h3><p class="muted tiny">${e(x.note || "")}</p><div class="buttons">${button("编辑", "edit-item", x.id)}${button("移除记录", "delete-item", x.id)}</div></div>`).join("") : empty("这里还没有手机物品记录", "记录不等于已经在剧情中获得。", "bag"))}</div>`;
+    return `<div class="pad">${hint("主线物品来自角色卡变量；手机附注另存，不擅自修改真实物品数量。")}${Object.keys(canonical).length ? section("主线背包（只读）", Object.entries(canonical).map(([name, x]) => `<div class="card"><h3>${e(name)} ${tag("× " + (x.数量 ?? 1))}</h3><p class="muted tiny">${e(x.描述 || "")}</p><small>${e([x.获得时间, x.获得地点].filter(Boolean).join(" · "))}</small></div>`).join("")) : ""}<div class="buttons">${button(icon("plus", 14) + " 添加手机物品记录", "new-item", "", "primary")}</div>${s.items.length ? tpDeleteBar("items", s.items.length, "物品记录") : ""}${section("手机记录与备注", s.items.length ? s.items.map((x) => `<div class="card"><h3>${e(x.title)} ${tag("× " + x.quantity)}</h3><p class="muted tiny">${e(x.note || "")}</p><div class="buttons">${button("编辑", "edit-item", x.id)}${button("移除记录", "delete-item", x.id)}</div></div>`).join("") : empty("这里还没有手机物品记录", "记录不等于已经在剧情中获得。", "bag"))}</div>`;
   }
   function albumView(ui) {
     const rows = ui.data.album;
-    return `<div class="pad">${hint("本地上传的照片存在本机手机专用图片库；用网址添加的照片只保存链接（图床、GitHub、Gitee 等），换设备也能显示。")}<div class="buttons" style="margin-bottom:15px">${button(icon("image", 14) + " 本地上传", "album-upload", "", "primary")}${button(icon("plus", 14) + " 用网址添加", "album-url")}</div>${rows.length ? `<div class="photo-grid">${[...rows].reverse().map((p) => `<button class="photo-card" data-action="photo" data-id="${e(p.id)}"><span class="photo"><img data-media="${e(p.mediaId)}" alt="${e(p.title || "留影")}"></span><small>${e(p.title || "这一刻")}</small></button>`).join("")}</div>` : empty("把某个瞬间留下来", "支持本地上传，也可以粘贴图床或 Git 仓库里的图片网址。", "image")}</div>`;
+    return `<div class="pad">${hint("本地上传的照片存在本机手机专用图片库；用网址添加的照片只保存链接（图床、GitHub、Gitee 等），换设备也能显示。")}<div class="buttons" style="margin-bottom:10px">${button(icon("image", 14) + " 本地上传", "album-upload", "", "primary")}${button(icon("plus", 14) + " 用网址添加", "album-url")}</div>${rows.length ? tpDeleteBar("album", rows.length, "照片") : ""}${rows.length ? `<div class="photo-grid">${[...rows].reverse().map((p) => `<div class="photo-card tp-photo-wrap"><button type="button" class="tp-photo-main" data-action="photo" data-id="${e(p.id)}"><span class="photo"><img data-media="${e(p.mediaId)}" alt="${e(p.title || "留影")}"></span><small>${e(p.title || "这一刻")}</small></button><button type="button" class="icon-btn tp-photo-del" data-action="delete-photo" data-id="${e(p.id)}" aria-label="删除照片" title="删除照片">${icon("trash", 12)}</button></div>`).join("")}</div>` : empty("把某个瞬间留下来", "支持本地上传，也可以粘贴图床或 Git 仓库里的图片网址。", "image")}</div>`;
   }
   function placesView(ui) {
     const zone = ui.route.zone || "all", s = ui.data;
@@ -6677,7 +7907,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
     const pick = ui.route.pick ? all.find((p) => p.id === ui.route.pick) : null;
     const zoneName = Object.fromEntries(PLACE_ZONES);
     const card = (p) => `<details class="details place"><summary>${icon("place", 15)} ${e(p.title)} <span class="tag ${p.zone === "HOME" ? "rose" : p.zone === "PLAY" ? "gold" : ""}">${e(p.kind)}</span></summary><p>${e(p.note || "")}${p.use ? "\n" + e(p.use) : ""}</p>${p.people.length ? `<p class="tiny muted">常在这里：${e(p.people.join("、"))}</p>` : ""}${p.acts.length ? `<div class="buttons">${p.acts.map((a, i) => button(e(a), "place-act", p.id + "|" + i)).join("")}</div>` : ""}<div class="buttons">${button("准备一个出行意向", "place-intent", p.id, "ghost")}${!p.native ? button("移除自建地点", "delete-place", p.id) : ""}</div></details>`;
-    return `<div class="pad"><div class="map-hero"><svg viewBox="0 0 320 120" aria-hidden="true"><path d="M0 120 L120 30 L150 18 L175 30 L320 120Z" fill="#dfe8dc"/><path d="M128 28 L150 18 L172 28 L162 36 L150 30 L138 36Z" fill="#fff"/><path d="M0 104 C60 92 110 110 170 100 S280 92 320 104 L320 120 L0 120Z" fill="#c8d8c4"/><path d="M20 118 C80 96 150 116 210 98 S300 96 320 90" stroke="#9fbfd0" stroke-width="3" fill="none"/>${(PRESET ? [...homes, ...native.filter((p) => p.zone !== "HOME")].slice(0, 6).map((p, i) => [p.title.slice(0, 8), [150, 118, 188, 70, 226, 150][i], [92, 100, 104, 84, 88, 60][i]]) : [["月夜露台", 150, 92], ["春山家", 118, 100], ["龙石家", 188, 104], ["源道寺家", 70, 84], ["北高", 226, 88], ["朝雾高原", 150, 60]]).map(([n, x, y]) => `<circle cx="${x}" cy="${y}" r="3.5" fill="#4f7561"/><text x="${x + 5}" y="${y - 4}" font-size="8" fill="#355846">${n}</text>`).join("")}</svg><div><b>${e(PRESET ? PRESET.mapTitle || "生活地图" : "富士宫生活地图")}</b><small>${all.length} 个地点 · ${PRESET ? "住处、街上、玩乐、自然与远行" : "三位女主的家、镇上、玩乐、自然与远行"}</small></div></div><div class="buttons">${button(icon("spark", 14) + " 今天去哪玩", "place-random", "", "primary")}${button(icon("plus", 14) + " 添加地点", "new-place")}</div>${pick ? `<div class="card pick"><div class="eyebrow">今日推荐 · ${e(zoneName[pick.zone] || "自建")}</div><h3 style="margin-top:6px">${e(pick.title)}</h3><p class="muted tiny">${e(pick.note || "")}</p>${pick.acts.length ? `<p class="tiny" style="margin-top:6px">可以：${e(pick.acts.join(" / "))}</p>` : ""}<div class="buttons">${button("就去这里", "place-intent", pick.id, "primary")}${button("换一个", "place-random")}</div></div>` : ""}${zone === "all" ? homes.length && section(PRESET ? "大家的住处" : "三位女主的家", `<div class="home-row">${homes.map((p) => `<button class="home-card" data-action="place-zone-home" data-id="${e(p.id)}"><b>${e(p.kind)}</b><small>${e(p.title)}</small></button>`).join("")}</div>`) : ""}<div class="subnav" style="padding:14px 0 4px">${[...PLACE_ZONES, ...custom.length ? [["CUSTOM", "自建"]] : []].map(([z, label]) => `<button class="chip ${zone === z ? "active" : ""}" data-action="place-zone" data-id="${z}">${e(label)}</button>`).join("")}</div>${hint("图鉴是地点参考，不代表已经到访；点玩法按钮只会把意向放进输入框，前往仍需剧情条件。")}${rows.length ? rows.map(card).join("") : empty("这个分类还没有地点", "可以自己添加一个。", "place")}</div>`;
+    return `<div class="pad"><div class="map-hero"><svg viewBox="0 0 320 120" aria-hidden="true"><path d="M0 120 L120 30 L150 18 L175 30 L320 120Z" fill="#dfe8dc"/><path d="M128 28 L150 18 L172 28 L162 36 L150 30 L138 36Z" fill="#fff"/><path d="M0 104 C60 92 110 110 170 100 S280 92 320 104 L320 120 L0 120Z" fill="#c8d8c4"/><path d="M20 118 C80 96 150 116 210 98 S300 96 320 90" stroke="#9fbfd0" stroke-width="3" fill="none"/>${(PRESET ? [...homes, ...native.filter((p) => p.zone !== "HOME")].slice(0, 6).map((p, i) => [p.title.slice(0, 8), [150, 118, 188, 70, 226, 150][i], [92, 100, 104, 84, 88, 60][i]]) : [["月夜露台", 150, 92], ["春山家", 118, 100], ["龙石家", 188, 104], ["源道寺家", 70, 84], ["北高", 226, 88], ["朝雾高原", 150, 60]]).map(([n, x, y]) => `<circle cx="${x}" cy="${y}" r="3.5" fill="#4f7561"/><text x="${x + 5}" y="${y - 4}" font-size="8" fill="#355846">${n}</text>`).join("")}</svg><div><b>${e(PRESET ? PRESET.mapTitle || "生活地图" : "富士宫生活地图")}</b><small>${all.length} 个地点 · ${PRESET ? "住处、街上、玩乐、自然与远行" : "三位女主的家、镇上、玩乐、自然与远行"}</small></div></div><div class="buttons">${button(icon("spark", 14) + " 今天去哪玩", "place-random", "", "primary")}${button(icon("plus", 14) + " 添加地点", "new-place")}</div>${custom.length ? tpDeleteBar("places", custom.length, "自建地点") : ""}${pick ? `<div class="card pick"><div class="eyebrow">今日推荐 · ${e(zoneName[pick.zone] || "自建")}</div><h3 style="margin-top:6px">${e(pick.title)}</h3><p class="muted tiny">${e(pick.note || "")}</p>${pick.acts.length ? `<p class="tiny" style="margin-top:6px">可以：${e(pick.acts.join(" / "))}</p>` : ""}<div class="buttons">${button("就去这里", "place-intent", pick.id, "primary")}${button("换一个", "place-random")}</div></div>` : ""}${zone === "all" ? homes.length && section(PRESET ? "大家的住处" : "三位女主的家", `<div class="home-row">${homes.map((p) => `<button class="home-card" data-action="place-zone-home" data-id="${e(p.id)}"><b>${e(p.kind)}</b><small>${e(p.title)}</small></button>`).join("")}</div>`) : ""}<div class="subnav" style="padding:14px 0 4px">${[...PLACE_ZONES, ...custom.length ? [["CUSTOM", "自建"]] : []].map(([z, label]) => `<button class="chip ${zone === z ? "active" : ""}" data-action="place-zone" data-id="${z}">${e(label)}</button>`).join("")}</div>${hint("图鉴是地点参考，不代表已经到访；点玩法按钮只会把意向放进输入框，前往仍需剧情条件。")}${rows.length ? rows.map(card).join("") : empty("这个分类还没有地点", "可以自己添加一个。", "place")}</div>`;
   }
 
   // src/ui/views-settings.js
@@ -6707,7 +7937,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   }
   function logsView(ui) {
     const logs = ui.data?.logs || [];
-    return `<div class="pad">${hint("这里显示任务结果与错误，不记录API密钥。记录只保留最近200条诊断；聊天原文不会因此被删。")}${ui.engine.router.lastRequest ? `<div class="card"><h3>最近一次请求</h3><p class="tiny muted">${e(MODULES[ui.engine.router.lastRequest.module] || ui.engine.router.lastRequest.module)} → ${e(ui.engine.router.lastRequest.profile)}<br>${e(ui.engine.router.lastRequest.model)}${ui.engine.router.lastRequest.mock ? "<br>离线模拟，未请求真实模型" : ""}</p></div>` : ""}${logs.length ? [...logs].reverse().map((l) => `<div class="log-line ${l.level === "warning" ? "warning" : ""}"><b>${e(MODULES[l.module] || "系统")} · ${e(new Date(l.ts).toLocaleTimeString("zh-CN"))}</b><p>${e(l.message)}</p></div>`).join("") : empty("暂时没有运行记录", "完成一次生成后，这里会留下结果。", "file")}</div>`;
+    return `<div class="pad">${hint("这里显示任务结果与错误，不记录API密钥。记录只保留最近200条诊断；聊天原文不会因此被删。")}${ui.engine.router.lastRequest ? `<div class="card"><h3>最近一次请求</h3><p class="tiny muted">${e(MODULES[ui.engine.router.lastRequest.module] || ui.engine.router.lastRequest.module)} → ${e(ui.engine.router.lastRequest.profile)}<br>${e(ui.engine.router.lastRequest.model)}${ui.engine.router.lastRequest.mock ? "<br>离线模拟，未请求真实模型" : ""}</p></div>` : ""}${logs.length ? tpDeleteBar("logs", logs.length, "运行记录") : ""}${logs.length ? [...logs].reverse().map((l) => `<div class="log-line ${l.level === "warning" ? "warning" : ""}"><b>${e(MODULES[l.module] || "系统")} · ${e(new Date(l.ts).toLocaleTimeString("zh-CN"))}</b><p>${e(l.message)}</p></div>`).join("") : empty("暂时没有运行记录", "完成一次生成后，这里会留下结果。", "file")}</div>`;
   }
 
   // src/ui/renderer.js

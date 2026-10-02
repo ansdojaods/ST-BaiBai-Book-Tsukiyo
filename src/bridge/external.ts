@@ -166,6 +166,46 @@ export function setExternalPinned(id: string, pinned: boolean, source?: string):
   saveExternal();
 }
 
+export function updateExternalNote(
+  id: string,
+  patch: { title?: string; text?: string; kind?: string; time?: string; pinned?: boolean },
+  source?: string,
+): ExternalNote | null {
+  const n = externalState.notes.find(x => x.id === id && (source === undefined || x.source === source));
+  if (!n) return null;
+  if (typeof patch.text === 'string' && patch.text.trim()) {
+    n.text = patch.text.trim().slice(0, 4000);
+  }
+  if (patch.title !== undefined) {
+    const t = String(patch.title ?? '').trim().slice(0, 120);
+    n.title = t || undefined;
+  }
+  if (typeof patch.kind === 'string' && patch.kind.trim()) {
+    n.kind = patch.kind.trim().slice(0, 40);
+  }
+  if (patch.time !== undefined) {
+    const tm = String(patch.time ?? '').trim().slice(0, 80);
+    n.time = tm || undefined;
+  }
+  if (typeof patch.pinned === 'boolean') {
+    n.pinned = patch.pinned || undefined;
+  }
+  n.ts = Date.now();
+  saveExternal();
+  return n;
+}
+
+export function removeExternalNotes(keys: Array<{ id: string; source?: string }>): number {
+  if (!Array.isArray(keys) || !keys.length) return 0;
+  const before = externalState.notes.length;
+  externalState.notes = externalState.notes.filter(
+    n => !keys.some(k => k.id === n.id && (k.source === undefined || k.source === n.source)),
+  );
+  const removed = before - externalState.notes.length;
+  if (removed > 0) saveExternal();
+  return removed;
+}
+
 export function replaceExternal(notes: ExternalNote[]): void {
   externalState.notes = notes.map(sanitize).filter((x): x is ExternalNote => !!x);
   saveExternal();
@@ -188,6 +228,7 @@ const KIND_LABEL: Record<string, string> = {
   phone_chat: '手机聊天',
   phone_promise: '手机约定',
   phone_moment: '朋友圈',
+  phone_heart: '恋爱心迹',
   agenda: '日程',
   fact: '事实',
 };

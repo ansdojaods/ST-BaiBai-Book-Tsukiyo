@@ -3,7 +3,7 @@ import type { ApiChannel } from '@/api/settings';
 import * as context from '@/st/context';
 import type { STContext } from '@/st/context';
 import { RESUMMARY_THINKING_CHECKLIST, RESUMMARY_THINKING_PREFILL } from '@/memory/prompts';
-import { buildRequestBody, requestCompletion } from './client';
+import { buildRequestBody, requestCompletion, testChannel, batchTestChannels } from './client';
 
 const channel: ApiChannel = {
   id: 'ch1',
@@ -127,3 +127,63 @@ describe('visible compression audit transport', () => {
     expect(messages).toHaveLength(4);
   });
 });
+
+describe('API 自定义测试(单独与批量)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('单独自定义测试:返回完整模型回复、耗时并写回 channel.lastTest,可选附带破限提示词', async () => {
+    vi.spyOn(context, 'getContext').mockReturnValue({
+      getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+    } as unknown as STContext);
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ choices: [{ message: { content: '我是 DeepSeek-V3，连接正常！' } }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const ch: ApiChannel = { ...channel, testPrompt: '只回答你的模型名' };
+    const res = await testChannel(ch, { withJailbreak: true });
+    expect(res.ok).toBe(true);
+    expect(res.reply).toBe('我是 DeepSeek-V3，连接正常！');
+    expect(res.prompt).toBe('只回答你的模型名');
+    expect(res.withJailbreak).toBe(true);
+    expect(res.ms).toBeGreaterThanOrEqual(1);
+    expect(ch.lastTest?.ok).toBe(true);
+    expect(ch.lastTest?.reply).toBe('我是 DeepSeek-V3，连接正常！');
+    expect(ch.lastTest?.prompt).toBe('只回答你的模型名');
+
+    const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(sentBody.messages).toHaveLength(3);
+    expect(sentBody.messages[2]).toEqual({ role: 'user', content: '只回答你的模型名' });
+  });
+
+  it('批量自定义测试:支持优先使用各渠道自己的测试用语并返回各渠道回复', async () => {
+    vi.spyOn(context, 'getContext').mockReturnValue({
+      getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+    } as unknown as STContext);
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(init?.body as string);
+      const userMsg = body.messages[body.messages.length - 1].content;
+      return Response.json({ choices: [{ message: { content: `收到:${userMsg}` } }] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const chA: ApiChannel = { ...channel, id: 'a', name: '渠道A', testPrompt: 'A专属用语' };
+    const chB: ApiChannel = { ...channel, id: 'b', name: '渠道B', testPrompt: '' };
+
+    const results = await batchTestChannels([chA, chB], {
+      phrase: '统一测试语句',
+      perChannel: true,
+    });
+    expect(results).toHaveLength(2);
+    expect(results[0].channelName).toBe('渠道A');
+    expect(results[0].prompt).toBe('A专属用语');
+    expect(results[0].reply).toBe('收到:A专属用语');
+    expect(results[1].channelName).toBe('渠道B');
+    expect(results[1].prompt).toBe('统一测试语句');
+    expect(results[1].reply).toBe('收到:统一测试语句');
+  });
+});
+

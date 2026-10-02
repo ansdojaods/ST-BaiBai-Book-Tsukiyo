@@ -360,3 +360,75 @@ export async function rerankDocuments(
 
   return merged.sort((a, b) => b.score - a.score);
 }
+
+export interface VectorEndpointTestResult {
+  ok: boolean;
+  ms: number;
+  detail?: string;
+  message: string;
+}
+
+/**
+ * 测试 Embedding 端点连通性与返回向量维度。
+ */
+export async function testEmbeddingEndpoint(): Promise<VectorEndpointTestResult> {
+  const t0 = Date.now();
+  try {
+    const ep = resolveVectorModel('embedding');
+    if (!ep.url.trim()) throw new EmbedError('请先填写 Embedding API 地址');
+    if (!ep.model.trim()) throw new EmbedError('请先填写 Embedding 模型名');
+    const vecs = await embedTexts(['百宝月夜书向量记忆连通性测试']);
+    const ms = Math.max(1, Date.now() - t0);
+    const dim = vecs[0]?.length ?? 0;
+    if (!dim) throw new EmbedError('返回的向量维度为 0');
+    return {
+      ok: true,
+      ms,
+      detail: `维度: ${dim}`,
+      message: `✓ Embedding 连通正常 (${(ms / 1000).toFixed(2)}s · 向量维度 ${dim})`,
+    };
+  } catch (e) {
+    const ms = Math.max(1, Date.now() - t0);
+    const err = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      ms,
+      message: `✗ ${err}`,
+    };
+  }
+}
+
+/**
+ * 测试 Rerank 端点连通性与排序打分返回。
+ */
+export async function testRerankEndpoint(): Promise<VectorEndpointTestResult> {
+  const t0 = Date.now();
+  try {
+    const ep = resolveVectorModel('rerank');
+    if (!ep.url.trim()) throw new EmbedError('请先填写 Rerank（或 Embedding 基准）API 地址');
+    if (!ep.model.trim()) throw new EmbedError('请先填写 Rerank 模型名');
+    const ranked = await rerankDocuments(
+      '月夜下的神社约定',
+      ['两人在月夜下约好明天一起去神社参拜。', '今天中午在食堂吃了炸猪排套餐。'],
+      2,
+    );
+    const ms = Math.max(1, Date.now() - t0);
+    if (!ranked.length) throw new EmbedError('Rerank 返回结果为空');
+    const top = ranked[0];
+    return {
+      ok: true,
+      ms,
+      detail: `最高分: ${Number(top.score).toFixed(4)} (doc#${top.index})`,
+      message: `✓ Rerank 连通正常 (${(ms / 1000).toFixed(2)}s · Top1 得分 ${Number(top.score).toFixed(3)})`,
+    };
+  } catch (e) {
+    const ms = Math.max(1, Date.now() - t0);
+    const err = e instanceof Error ? e.message : String(e);
+    return {
+      ok: false,
+      ms,
+      message: `✗ ${err}`,
+    };
+  }
+}
+
