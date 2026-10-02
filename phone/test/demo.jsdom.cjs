@@ -2,7 +2,7 @@
 // 用法: node phone/test/demo.jsdom.cjs [bundle.js]
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
-let src = fs.readFileSync(process.argv[2] || require('path').join(__dirname, '..', 'tsukiyo-phone-1.6.1.js'), 'utf8');
+let src = fs.readFileSync(process.argv[2] || require('path').join(__dirname, '..', 'tsukiyo-phone-1.6.2.js'), 'utf8');
 src = src.replace('baibaiRuntime.enabled = eng.bridge.mode !== "demo";', 'baibaiRuntime.enabled = true;');
 const code = src.slice(0, src.lastIndexOf('TsukiyoPhoneBundle.start('));
 const dom = new JSDOM('<!doctype html><html><body><div id="chat"></div></body></html>', { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/' });
@@ -53,6 +53,14 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   ui.open('memories'); await sleep(250);
   console.log('memory view tag 柏宝书:', ui.shadow.innerHTML.includes('>柏宝书<'));
   // memory-sync exclusion: planMemorySync input filtered — check via memoryBook plan if accessible
+  // New memory-page controls in the real rendered phone UI.
+  await click('memories', 'baibai-preview-memory');
+  await click('memories', 'baibai-brief');
+  if (eng.settings.data.ui.baibai.brief !== false) throw Error('read toggle did not switch OFF');
+  await click('memories', 'baibai-brief');
+  if (eng.settings.data.ui.baibai.brief !== true) throw Error('read toggle did not switch ON');
+  if (!eng.repo.data.memories.some(m => m.bb)) throw Error('toggle deleted saved book memories');
+  console.log('MEMORY_UI_OK: preview and read toggle ON/OFF; saved memories retained');
   // toggles
   await click('settings', 'baibai-enabled');
   console.log('after disable: status:', eng.baibai.status().text, '| settings.ui.baibai =', JSON.stringify(eng.settings.data.ui.baibai));

@@ -1,0 +1,17 @@
+{
+  "type": "script",
+  "enabled": true,
+  "name": "月夜来信 · 小手机（独立版）v1.6（百宝月夜书联动）",
+  "id": "5ac630d9-b12e-53ec-bfd1-c7069b1337e5",
+  "content": "",
+  "info": "月夜来信小手机：可选实时读取百宝月夜书记忆。脚本更新时保留原ID；勿与卡内旧手机同时启用。",
+  "button": {
+    "enabled": false,
+    "buttons": []
+  },
+  "data": {},
+  "export_with": {
+    "data": true,
+    "button": true
+  }
+}

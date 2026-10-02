@@ -1,6 +1,6 @@
 {
   "name": "st-baibai-book-tsukiyo",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,11 +13,16 @@
     "test:memory": "node scripts/test-memory-regressions.mjs",
     "prewatch": "node scripts/sync-version.mjs",
     "watch": "vite build --watch --mode development",
-    "test:phone": "node phone/test/smoke.cjs",
-    "build:phone": "python3 phone/patch/apply_phone_patch.py phone/base/tsukiyo-phone-1.5.2.js phone/tsukiyo-phone-1.6.1.js && node phone/test/smoke.cjs"
+    "test:phone": "node phone/test/smoke.cjs && node phone/test/memory-generation.cjs",
+    "build:phone": "python3 phone/patch/apply_phone_patch.py phone/base/tsukiyo-phone-1.5.2.js phone/tsukiyo-phone-1.6.2.js && python3 phone/patch/build_json.py phone/tsukiyo-phone-1.6.2.js phone/dist --standalone phone/patch/standalone-template.json && npm run test:phone",
+    "typecheck": "vue-tsc --noEmit",
+    "test:phone-ui": "node phone/test/demo.jsdom.cjs",
+    "check:local": "node scripts/check-local-only.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@vitejs/plugin-vue": "^6.0.7",
+    "jsdom": "^26.1.0",
     "typescript": "^5.7.0",
     "vite": "^7.3.3",
     "vitest": "^4.1.10",
@@ -26,5 +31,5 @@
   "dependencies": {
     "vue": "^3.5.35"
   },
-  "description": "百宝月夜书:柏宝书记忆引擎 + 锚点日记 + 白鸟后端备份 + 月夜来信小手机联动(非官方分支)"
+  "description": "百宝月夜书：手写楼层补摘、可选手机记忆读取、本地备份恢复（无白鸟远程后端）"
 }

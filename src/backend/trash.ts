@@ -3,7 +3,7 @@
  *
  * 柏宝书原版删除摘要/锚点是即时且不可逆的。这里在删除前把对象丢进
  * chatMetadata['baibai_book_trash'],用户可在「联动·备份」页一键恢复;
- * 条数超过设置上限时淘汰最旧的。白鸟后端可用时另有一份镜像(见 sync.ts)。
+ * 条数超过设置上限时淘汰最旧的。旧版远程后端可用时另有一份镜像(见 sync.ts)。
  */
 import { reactive } from 'vue';
 import { getContext } from '@/st/context';

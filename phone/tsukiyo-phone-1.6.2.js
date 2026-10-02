@@ -1,4 +1,4 @@
-/* 月夜来信 · 小手机 v1.6.1（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · 日期/时间字段可直接手输 · 剧情日期/时刻/地点识别增强：支持 世界/环境/场景/scene 等结构与角色卡开场预设 · 每个 API 方案独立的自定义测活按钮与专属测试用语 · 测活结果留存 · 多卡通用版：联系人/地点可由角色卡预置 · 批量测活 / 私聊连发 / 按回复数主动来信 / 跨设备同步 / 自定义提示词 / 正文剧情规划条） · 无字体阴影 / 剧情规划按回复间隔推进 / 月历与整月节日 / 相册网址图片 · 联系人导入与管理 / 记忆世界书双向同步 / 多人生成 / 模块开关 / 点线面剧情规划 / 手机与 iPad 适配 · 原创实现 · 不含用户 API 密钥或聊天存档 */
+/* 月夜来信 · 小手机 v1.6.2（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · 日期/时间字段可直接手输 · 剧情日期/时刻/地点识别增强：支持 世界/环境/场景/scene 等结构与角色卡开场预设 · 每个 API 方案独立的自定义测活按钮与专属测试用语 · 测活结果留存 · 多卡通用版：联系人/地点可由角色卡预置 · 批量测活 / 私聊连发 / 按回复数主动来信 / 跨设备同步 / 自定义提示词 / 正文剧情规划条） · 无字体阴影 / 剧情规划按回复间隔推进 / 月历与整月节日 / 相册网址图片 · 联系人导入与管理 / 记忆世界书双向同步 / 多人生成 / 模块开关 / 点线面剧情规划 / 手机与 iPad 适配 · 原创实现 · 不含用户 API 密钥或聊天存档 */
 var TSUKIYO_PRESET = /*@@PRESET@@*/null/*@@END@@*/;
 var TsukiyoPhoneBundle = (() => {
   var PRESET = typeof TSUKIYO_PRESET === "object" && TSUKIYO_PRESET && Array.isArray(TSUKIYO_PRESET.contacts) ? TSUKIYO_PRESET : null;
@@ -31,7 +31,7 @@ var TsukiyoPhoneBundle = (() => {
   });
 
   // package.json
-  var package_default = { name: "tsukiyo-phone", version: "1.6.1", description: "月夜来信 · 独立实现的酒馆拟真社交与生活手机（酒馆助手脚本）" };
+  var package_default = { name: "tsukiyo-phone", version: "1.6.2", description: "月夜来信 · 独立实现的酒馆拟真社交与生活手机（酒馆助手脚本）" };
 
   // src/core/utils.js
   var VERSION = package_default.version;
@@ -605,7 +605,7 @@ var TsukiyoPhoneBundle = (() => {
   // 百宝月夜书（ST-BaiBai-Book-Tsukiyo ≥1.3.0）联动：只读其公开 API，不触碰其内部数据；手机的一切改动都留在手机。
   var BAIBAI_SOURCE = "tsukiyo-phone";
   var BAIBAI_EVENTS = ["st-baibai-book:phone-update", "st-baibai-book:changed", "st-baibai-book:ready"];
-  var BAIBAI_BRIEF_ARGS = { historyChars: 2400, anchorChars: 1200 };
+  var BAIBAI_BRIEF_ARGS = { anchorChars: 1200 };
   var baibaiRuntime = { win: null, settings: () => null, enabled: true, cache: null, cacheAt: 0 };
   function baibaiCandidates(win) {
     const list = [];
@@ -655,7 +655,14 @@ var TsukiyoPhoneBundle = (() => {
     baibaiRuntime.cache = null;
     baibaiRuntime.cacheAt = 0;
   }
+  function baibaiReadEnabled() {
+    if (!baibaiPrefs().brief) return false;
+    const api = baibaiApi();
+    try { return !!api && (typeof api.isEnabled !== "function" || api.isEnabled()) && (typeof api.canReadMemory !== "function" || api.canReadMemory()); }
+    catch { return false; }
+  }
   function baibaiBrief(win = null, { maxAge = 2500 } = {}) {
+    if (!baibaiReadEnabled()) { baibaiInvalidate(); return null; }
     const api = baibaiApi(win);
     if (!api) return null;
     try {
@@ -709,27 +716,58 @@ var TsukiyoPhoneBundle = (() => {
     const body = text(p.content, 200);
     return body ? (p.kind ? "[" + text(p.kind, 12) + "] " : "") + body + (extra ? "（" + extra + "）" : "") : "";
   }
-  function baibaiActorBrief(contact, mainAllowed) {
-    if (!baibaiPrefs().brief) return void 0;
+  function baibaiActorBrief(contact, mainAllowed, { social = false, group = false } = {}) {
     const brief = baibaiBrief();
     if (!brief) return void 0;
-    let profile = "";
-    try {
-      profile = text(baibaiApi()?.getNpcProfile?.(contact.name) || "", 1200);
-    } catch {
+    // 未标注知情人的计划不凭姓名猜权限。公开动态/群聊不加入整份私密摘要。
+    const privateAllowed = !!mainAllowed && !social && !group;
+    const npc = (brief.npcs || []).find(n => n.name === contact.name);
+    let profile = npc ? { 姓名: npc.name, 称呼: text(npc.title, 80), 性格: text(npc.personality, 200) } : "（暂无本人资料）";
+    if (privateAllowed) {
+      try { profile = text(baibaiApi()?.getNpcProfile?.(contact.name) || "", 1200) || profile; } catch {}
     }
-    const plans = (Array.isArray(brief.plans) ? brief.plans : []).filter((p) => mainAllowed || String(p?.content || "").includes(contact.name)).map(baibaiPlanLine).filter(Boolean).slice(0, 6);
-    return { 来源: "柏宝书记忆引擎（只读；与正文冲突时以正文为准）", 剧情时间: baibaiClock(brief), 本人档案: profile || "（柏宝书尚未记录此人）", 相关未了结计划: plans, 近期剧情摘要: mainAllowed ? baibaiTail(brief.history, 1800) : "（本人不在场，不读取主线摘要）", 锚点日记: mainAllowed && brief.anchor && brief.anchor.text ? baibaiTail(brief.anchor.text, 800) : "" };
+    return { 来源: "柏宝书记忆（只读参考，不强制采用，不代表已公开或人人知情）", 剧情时间: baibaiClock(brief), 本人档案: profile,
+      相关未了结计划: privateAllowed ? (brief.plans || []).map(baibaiPlanLine).filter(Boolean).slice(0, 6) : [],
+      近期剧情摘要: privateAllowed ? baibaiTail(brief.history, 1800) : "（未授权或公开/群聊场景，不读取全局剧情摘要）",
+      锚点日记: privateAllowed && brief.anchor ? baibaiTail(brief.anchor.text, 800) : "",
+      本人生活细节: privateAllowed ? (brief.lifeDetails || []).filter(d => d.subject === contact.name).slice(0, 8).map(d => text(d.text, 160)) : [],
+      说明: "摘要是叙事参考，不是本人自动获知的事实。只使用亲历或明确获知的部分；群聊和公开动态不补入私聊秘密。" };
   }
   function baibaiPlanningBrief() {
-    if (!baibaiPrefs().brief) return void 0;
     const brief = baibaiBrief();
     if (!brief) return void 0;
-    return { 剧情时间: baibaiClock(brief), 地点: text(brief.location, 80), 在场: Array.isArray(brief.presentNpcs) ? brief.presentNpcs.slice(0, 12) : [], 未了结计划: (Array.isArray(brief.plans) ? brief.plans : []).map(baibaiPlanLine).filter(Boolean).slice(0, 8), 近期剧情摘要: baibaiTail(brief.history, 2e3), 锚点日记: brief.anchor && brief.anchor.text ? baibaiTail(brief.anchor.text, 600) : "", 说明: "来自柏宝书的分层摘要，用于把握时间线与伏笔；与【实际正文】冲突时以正文为准" };
+    return { 来源: "柏宝书记忆·实时只读", 剧情时间: baibaiClock(brief), 地点: text(brief.location, 80),
+      在场: (brief.presentNpcs || []).slice(0, 12), 未了结计划: (brief.plans || []).map(baibaiPlanLine).filter(Boolean).slice(0, 8),
+      近期剧情摘要: baibaiTail(brief.history, 2400), 锚点日记: brief.anchor ? baibaiTail(brief.anchor.text, 800) : "",
+      人物档案: (brief.npcs || []).slice(0, 12).map(n => ({ 姓名: n.name, 称呼: text(n.title, 80), 关系: text(n.relation, 100), 近况: text(n.condition, 120) })),
+      物品: (brief.items || []).slice(0, 15).map(i => ({ 名称: text(i.name, 80), 数量: i.qty, 所在: text(i.location, 80) })),
+      生活细节: (brief.lifeDetails || []).slice(0, 12).map(d => ({ 主语: text(d.subject, 40), 内容: text(d.text, 160) })),
+      说明: "可参考而非必须使用；以当前正文为准。计划不等于已发生，摘要不能替代逐字原文证据；不要凭提及姓名推断知情人。" };
+  }
+  // 每次生成重新读当前简报；过滤只发生在请求副本，不删除用户手机存档。
+  function baibaiFilterInput(data) {
+    baibaiInvalidate();
+    if (!baibaiReadEnabled()) data.memories = (data.memories || []).filter(m => !m.bb);
+    return data;
+  }
+  function baibaiEnrichRequest(module, request) {
+    if (!baibaiReadEnabled()) return request;
+    const payload = request.payload;
+    if (!isObject(payload)) return request;
+    // 聊天/主动来信/朋友圈由 actorContext 按人构建，不能再追加全知简报。
+    // 多人角色日记同样只使用各自角色资料中的参考。
+    if (["planner", "memory", "diary"].includes(module) && !payload.写日记的角色 && !payload.柏宝书) {
+      payload.柏宝书记忆参考 = baibaiPlanningBrief();
+    }
+    request.system += "\n柏宝书记忆是可选背景，不必强行套用；角色只采用本人已知事实，未执行计划不得写成完成。整理记忆或核对进度时，仍须满足原任务指定的消息ID/正文楼层/逐字引文证据，不能拿简报冒充原文。";
+    return request;
+  }
+  function baibaiMemoryCard() {
+    return `<div class="card"><h3>柏宝书 · 实时记忆参考</h3><p class="tiny muted">${baibaiReadEnabled() ? "读取已开启：生成时参考最新记忆，不必重复导入；公开动态与群聊不读取全局私密摘要。" : "读取已关闭或未连接：手机使用自身上下文。开启需要两边的读取开关均允许。"}</p><div class="buttons">${button("切换记忆读取", "baibai-brief")}${button("查看当前参考", "baibai-preview-memory")}</div></div>`;
   }
   function baibaiMemoryCandidates(brief, s) {
     const out = [];
-    const mention = (t) => ["user", ...s.contacts.filter((c) => c.name && t.includes(c.name)).map((c) => c.id)];
+    const mention = (_t) => ["user"]; // 导入副本默认仅玩家可见；知情人须由用户明确设置
     for (const p of Array.isArray(brief.plans) ? brief.plans : []) {
       const line = baibaiPlanLine(p);
       if (!line) continue;
@@ -840,9 +878,9 @@ var TsukiyoPhoneBundle = (() => {
       return rows;
     }
     async push({ force = false } = {}) {
-      if (!baibaiPrefs().push && !force) return null;
+      if (!baibaiPrefs().push) return null;
       const api = baibaiApi(), s = this.eng.repo.data, snap = this.eng.repo.snapshot;
-      if (!api || !s || !snap || this.busy) return null;
+      if (!api || !s || !snap || this.busy || (typeof api.isEnabled === "function" && !api.isEnabled())) return null;
       this.busy = true;
       try {
         const rows = this.notes(s, snap);
@@ -860,9 +898,9 @@ var TsukiyoPhoneBundle = (() => {
           const prev = existing.get(r.id);
           return prev && Number.isInteger(prev.floor) ? { ...r, floor: prev.floor } : r;
         });
+        if (!fresh.length) { this.lastSig = sig; return { added: 0, updated: 0, total: existing.size }; }
+        const r = await api.pushNotes(BAIBAI_SOURCE, fresh);
         this.lastSig = sig;
-        if (!fresh.length) return { added: 0, updated: 0, total: existing.size };
-        const r = api.pushNotes(BAIBAI_SOURCE, fresh);
         this.last = { at: Date.now(), ok: true, message: "", added: Number(r?.added) || 0, updated: Number(r?.updated) || 0 };
         baibaiInvalidate();
         this.eng.emit("status");
@@ -896,11 +934,11 @@ var TsukiyoPhoneBundle = (() => {
   function actorContext(s, snap, contact, { social = false, groupId = "", participants = [] } = {}) {
     const presence = snap.present?.includes(contact.name);
     const mainAllowed = s.settings.readNarrative && (presence || contact.allowNarrative);
-    const accepted = s.memories.filter((m) => m.enabled !== false && (m.visibility === "public" || (groupId ? m.threadId === groupId || participants.length > 0 && participants.every((p) => m.audience.includes(p)) && m.audience.includes("user") : m.audience.includes(contact.id)))).slice(-12);
+    const accepted = s.memories.filter((m) => (!m.bb || baibaiReadEnabled()) && m.enabled !== false && (m.visibility === "public" || (groupId ? m.threadId === groupId || participants.length > 0 && participants.every((p) => m.audience.includes(p)) && m.audience.includes("user") : m.audience.includes(contact.id)))).slice(-12);
     return { 当前关系: { 已相认: contact.recognized, 已建立联系: contact.reachable, 阶段: snap.stat?.关系?.[contact.name]?.关系阶段 || "以既有互动为准", 承诺: groupId || social ? "此处不提供私人承诺细节" : snap.stat?.关系?.[contact.name]?.承诺 || "没有自动增加承诺", 当前衣着: snap.stat?.关系?.[contact.name]?.当前衣着 || "以实际出场为准" }, 主线中本人已获知的回忆: Object.values(snap.stat?.回忆?.已公开 || {}).filter((r) => Array.isArray(r?.知情人) && r.知情人.includes(contact.name) && (!groupId || participants.every((p) => r.知情人.includes(s.contacts.find((c) => c.id === p)?.name))) && (!social || r.公开 === true)).slice(-6).map((r) => ({ 标题: text(r.标题, 100), 内容: text(r.摘要 || r.内容, 500) })), 本人: { id: contact.id, 姓名: contact.name, 年龄: contact.age, 人设: text(contact.bio, 6e3), 新增补充: text(contact.extraNotes || "", 1500), 绑定资料补充: (contact.references || []).slice(-2).map((r) => ({ 来源: r.book, 内容: text(r.content, 3200) })), 最近状态: contact.status, 过往: visibleHistory(contact, snap).slice(-8).map((h) => ({ 标题: text(h.title, 80), 时间: text(h.time, 100), 内容: text(h.text, 600) })) }, 剧情时间: (() => {
       const w = storyFor(s, snap);
       return mainAllowed ? w : { date: w.date, time: w.time, origin: w.origin, 说明: "未向本人披露玩家当前位置与当地天气" };
-    })(), 相关约定: s.agenda.filter((a) => (a.members || []).includes(contact.id) && (!social || a.visibility === "public") && (!groupId || a.visibility === "public" || participants.every((p) => (a.members || []).includes(p)))).slice(-6).map((a) => ({ 内容: text(a.title, 160), 日期: a.date, 时间: a.time, 状态: a.status })), 本人已知记忆: social ? accepted.filter((m) => m.visibility === "public") : accepted.map((m) => ({ 内容: m.text, 类型: m.kind, 依据: m.sources })), 当前可见正文: mainAllowed ? snap.history.slice(-3).map((m) => ({ 楼层: m.floor, 角色: m.role, 文本: m.text.slice(-2200) })) : [], 柏宝书简报: baibaiActorBrief(contact, mainAllowed), 知情说明: mainAllowed ? "只采用本人能看到、听到或已被告知的事实；正文中的他人内心与私下片段不可当作本人知情。" : "本人不在当前现场，没有收到告知，因此不能读取当前私密正文。可依据时间、本人日程和已收到的消息主动联系。" };
+    })(), 相关约定: s.agenda.filter((a) => (a.members || []).includes(contact.id) && (!social || a.visibility === "public") && (!groupId || a.visibility === "public" || participants.every((p) => (a.members || []).includes(p)))).slice(-6).map((a) => ({ 内容: text(a.title, 160), 日期: a.date, 时间: a.time, 状态: a.status })), 本人已知记忆: social ? accepted.filter((m) => m.visibility === "public") : accepted.map((m) => ({ 内容: m.text, 类型: m.kind, 依据: m.sources })), 当前可见正文: mainAllowed ? snap.history.slice(-3).map((m) => ({ 楼层: m.floor, 角色: m.role, 文本: m.text.slice(-2200) })) : [], 柏宝书简报: baibaiActorBrief(contact, mainAllowed, { social, group: !!groupId }), 知情说明: mainAllowed ? "只采用本人能看到、听到或已被告知的事实；正文中的他人内心与私下片段不可当作本人知情。" : "本人不在当前现场，没有收到告知，因此不能读取当前私密正文。可依据时间、本人日程和已收到的消息主动联系。" };
   }
   function threadContext(s, snap, thread) {
     return { 会话: { id: thread.id, 类型: thread.kind, 标题: thread.title, 成员: thread.members.map((id2) => {
@@ -3362,13 +3400,15 @@ ${from.bio.trim()}`;
         const snap = task.snapshot;
         assert(!(snap.character?.name?.includes("臭小鬼") && snap.stat?.系统?.作品 !== "臭小鬼"), "请先等待原卡变量初始化，再使用生成");
         assert(!(snap.stat?.系统?.作品 === "臭小鬼" && !snap.stat.系统.已选开场), "请先选择原卡开场，手机不会提前制造经历");
-        const data = clone(this.repo.choose(snap));
-        const sigFn = sigOf || ((x) => moduleSignature(module, x)), sig = sigFn(data), apiSig = fingerprint([this.settings.data.profiles, this.settings.data.routes, this.settings.data.defaultProfile, this.settings.data.enabled]);
-        const request = prepare(data, snap);
+        const data = baibaiFilterInput(clone(this.repo.choose(snap)));
+        const sigFn = sigOf || ((x) => moduleSignature(module, x)), sig = sigFn(this.repo.choose(snap)), apiSig = fingerprint([this.settings.data.profiles, this.settings.data.routes, this.settings.data.defaultProfile, this.settings.data.enabled]);
+        const bbPolicy = fingerprint([baibaiPrefs(), baibaiReadEnabled()]);
+        const request = baibaiEnrichRequest(module, prepare(data, snap));
         const raw = await this.router.call(module, { system: request.system, user: JSON.stringify(request.payload) }, { signal: task.signal, meta: request.meta });
         task.guard();
         assert(externalGuard(), "后台任务执行权已变化");
         assert(apiSig === fingerprint([this.settings.data.profiles, this.settings.data.routes, this.settings.data.defaultProfile, this.settings.data.enabled]), "API配置已经变化，旧结果未写入");
+        assert(bbPolicy === fingerprint([baibaiPrefs(), baibaiReadEnabled()]), "记忆联动开关已变化，请重新生成");
         const value = request.parse(raw);
         let result;
         const notifications = [];
@@ -3526,9 +3566,9 @@ ${from.bio.trim()}`;
         assert(chosen.length, "请至少选择一位写日记的角色");
         const people = chosen.filter((c) => c.id !== "user").map((c) => {
           const ctx = actorContext(s, snap, c);
-          return { 名字: c.name, 年龄: c.age, 状态: c.status, 人设: text(c.bio || ctx.本人?.人设 || "", 900), 本人过往: (ctx.本人?.过往 || []).slice(-3), 本人知道的约定与记忆: ctx.相关约定, 可见正文: (ctx.当前可见正文 || []).slice(-2) };
+          return { 名字: c.name, 年龄: c.age, 状态: c.status, 人设: text(c.bio || ctx.本人?.人设 || "", 900), 本人过往: (ctx.本人?.过往 || []).slice(-3), 本人知道的约定与记忆: ctx.相关约定, 柏宝书简报: ctx.柏宝书简报, 可见正文: (ctx.当前可见正文 || []).slice(-2) };
         });
-        return { system: rules + '\n为每位指定角色各写一篇今天的日记（第一人称，用本人的口吻、用词习惯和关注点）。每人只写本人亲历、亲耳听到或本人手机里收到的事；不知道的事不写，不读取别人的私聊。可以写本人自己的日常（上课、训练、店务、家事、社团、心事），不必都围绕玩家。不替玩家写心理、台词或同意。若写“玩家”的日记，只记录已在正文发生的客观经历，心情用留白。只输出 {"entries":[{"author":"角色名或玩家","title":"20字内标题","mood":"两字心情","text":"300—600字日记"}]}，顺序与给定角色一致。', payload: { 剧情时间: storyFor(s, snap), 写日记的角色: chosen.map((c) => c.name), 角色资料: people, 近期正文: snap.history.slice(-5), 今日日程: s.agenda.filter((a) => a.date === storyFor(s, snap).date).map((a) => a.title) }, parse: (raw) => diariesFrom(raw, chosen), meta: {}, success: "角色日记已保存为草稿" };
+        return { system: rules + '\n为每位指定角色各写一篇今天的日记（第一人称，用本人的口吻、用词习惯和关注点）。每人只写本人亲历、亲耳听到或本人手机里收到的事；不知道的事不写，不读取别人的私聊。可以写本人自己的日常（上课、训练、店务、家事、社团、心事），不必都围绕玩家。不替玩家写心理、台词或同意。若写“玩家”的日记，只记录已在正文发生的客观经历，心情用留白。只输出 {"entries":[{"author":"角色名或玩家","title":"20字内标题","mood":"两字心情","text":"300—600字日记"}]}，顺序与给定角色一致。', payload: { 剧情时间: storyFor(s, snap), 写日记的角色: chosen.map((c) => c.name), 角色资料: people, 玩家记忆参考: chosen.length === 1 && chosen[0].id === "user" ? baibaiPlanningBrief() : void 0, 近期正文: chosen.length === 1 && chosen[0].id === "user" ? snap.history.slice(-5) : [], 今日日程: s.agenda.filter((a) => a.date === storyFor(s, snap).date).map((a) => a.title) }, parse: (raw) => diariesFrom(raw, chosen), meta: {}, success: "角色日记已保存为草稿" };
       }, (s, rows, snap) => {
         const date = storyFor(s, snap).date;
         for (const r of rows) limitAppend(s.diary, { id: id("diary"), ...r, date, status: "draft", ts: Date.now(), source: "AI · " + r.authorName }, 300, "日记");
@@ -5945,6 +5985,13 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
           s.settings.inject = !s.settings.inject;
         }, "切换正文记忆联动");
         return;
+      case "baibai-preview-memory": {
+        baibaiInvalidate();
+        const brief = baibaiPlanningBrief();
+        assert(brief, "记忆读取未开启或尚未连接，请检查手机设置和柏宝书联动页的读取开关");
+        await ui.confirm("柏宝书记忆参考（只读）", JSON.stringify(brief, null, 2), "知道了");
+        return;
+      }
       case "baibai-enabled":
       case "baibai-brief":
       case "baibai-push":
@@ -5965,6 +6012,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
       }
       case "baibai-import-memory": {
         assert(ui.data, "先打开一个聊天");
+        assert(baibaiReadEnabled(), "请先开启柏宝书记忆读取");
         const brief = baibaiBrief(null, { maxAge: 0 });
         assert(brief, "未检测到柏宝书，或柏宝书关闭了小手机联动");
         const snapNow = snapshot(ui);
@@ -5974,7 +6022,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
           ui.notify("柏宝书里没有新的可导入记忆。");
           return;
         }
-        if (!await ui.confirm("导入柏宝书记忆？", `将把 ${fresh.length} 条柏宝书的未了结计划 / 锚点日记 / 分层剧情摘要存为手机记忆（带“柏宝书”标记：不同步进记忆世界书，也不会再注入正文，避免与柏宝书自己的注入重复）。可在“记忆”里逐条停用或删除。`)) return;
+        if (!await ui.confirm("导入柏宝书记忆？", `将把 ${fresh.length} 条柏宝书的未了结计划 / 锚点日记 / 分层剧情摘要存为手机记忆（带“柏宝书”标记：不同步进记忆世界书，也不会再注入正文，避免与柏宝书自己的注入重复）。默认仅玩家知情；可在“记忆”里明确设置其他知情人、停用或删除。`)) return;
         let count = 0;
         await change(ui, (s) => {
           const ids = new Set(s.memories.map((m) => m.id));
@@ -6577,7 +6625,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   }
   function memoryView(ui) {
     const s = ui.data;
-    return `<div class="pad"><div class="mini-stat">${icon("memory", 28)}<strong>${s.memories.length}</strong><span>条有范围的记忆<br>${s.summaries.length} 份会话摘要</span></div>${bookCard(ui)}${hint("原文、来源、知情者分别保留。邀请不是已经发生的行动；私人经历不会自动广播给其他角色。")}<div class="buttons">${button("整理新的交流", "summarize", "", "primary")}${button("查看正文注入", "inspect-injection")}${button(icon("plus", 14) + " 新增记忆", "new-memory")}</div>${section("明确记录的事", s.memories.length ? [...s.memories].reverse().map((m) => memoryCard(ui, m)).join("") : empty("还没有需要特别记下的事", "可以手动新增，或点“AI 生成记忆”从正文里提炼；摘要只是长线辅助。", "book"))}${s.summaries.length ? section("滚动摘要", s.summaries.slice(-8).reverse().map((m) => `<details class="details"><summary>${e(s.threads.find((t) => t.id === m.threadId)?.title || "旧会话")} · 摘要</summary><p>${e(m.text)}</p></details>`).join("")) : ""}</div>`;
+    return `<div class="pad"><div class="mini-stat">${icon("memory", 28)}<strong>${s.memories.length}</strong><span>条有范围的记忆<br>${s.summaries.length} 份会话摘要</span></div>${bookCard(ui)}${baibaiMemoryCard()}${hint("原文、来源、知情者分别保留。邀请不是已经发生的行动；私人经历不会自动广播给其他角色。")}<div class="buttons">${button("整理新的交流", "summarize", "", "primary")}${button("查看正文注入", "inspect-injection")}${button(icon("plus", 14) + " 新增记忆", "new-memory")}</div>${section("明确记录的事", s.memories.length ? [...s.memories].reverse().map((m) => memoryCard(ui, m)).join("") : empty("还没有需要特别记下的事", "可以手动新增，或点“AI 生成记忆”从正文里提炼；摘要只是长线辅助。", "book"))}${s.summaries.length ? section("滚动摘要", s.summaries.slice(-8).reverse().map((m) => `<details class="details"><summary>${e(s.threads.find((t) => t.id === m.threadId)?.title || "旧会话")} · 摘要</summary><p>${e(m.text)}</p></details>`).join("")) : ""}</div>`;
   }
 
   // src/ui/views-life.js
@@ -6620,7 +6668,7 @@ ${q.contacts}位联系人、${q.threads}个会话、${q.messages}条消息、${q
   // src/ui/views-settings.js
   function settingsView(ui) {
     const s = ui.data, c = ui.engine.settings.data, bridge = ui.engine.bridge, bb = ui.engine.baibai ? ui.engine.baibai.status() : null;
-    return `<div class="pad"><div class="card"><div style="display:flex;align-items:center;gap:12px"><span class="avatar sage">${icon("moon", 23)}</span><div><h3 style="margin:0">月夜来信</h3><small>TSUKIYO PHONE · ${VERSION}</small></div></div><div class="divider"></div><p class="tiny muted">${bridge.mode === "demo" ? "当前为离线演示。模拟消息不会写入真实酒馆。" : "手机与当前角色聊天相连；不把界面状态冒充主线事实。"}</p></div><div class="card">${settingLink("API方案与模块分配", "go", "settings", c.profiles.length + " 个方案" + (Object.keys(MODULES).filter((k) => !ui.engine.settings.isEnabled(k)).length ? " · " + Object.keys(MODULES).filter((k) => !ui.engine.settings.isEnabled(k)).length + " 个模块已关闭" : ""), "api")}${switchRow("正文下显示剧情规划条", "在最新一条角色回复下方显示当前面·线·点，可一键打开或推进；状态栏脚本也可读取 __TSUKIYO_PHONE__.plan()", "plan-strip", c.ui.planStrip !== false)}${settingLink("自定义提示词", "edit-prompt", "note", c.prompt?.enabled && c.prompt.text ? "已启用 · 每次请求最先发送" : "未启用")}${settingLink("后台、来信与剧情方向", "go", "bell", s?.settings.auto.enabled ? "已开启" : "未开启", "automation")}${settingLink("备份与恢复", "go", "download", "只操作本手机", "backup")}${settingLink("运行记录", "go", "file", "任务与失败可追踪", "logs")}${settingLink("存档与规划状态", "go", "memory", "三层存档 · 自动推进", "diag")}${settingLink("正文注入检查", "inspect-injection", "memory", bridge.injectionReady ? "接口已就绪" : "尚未确认")}</div><div class="card">${switchRow("夜间阅读", "只改变手机外观，不改变剧情时间", "theme", c.theme === "night")}${s ? switchRow("角色卡人物全部解锁", "月夜来信卡的全部联系人直接可用；关闭后按剧情逐个解锁", "unlock-all", s.settings.unlockAll) : ""}${s ? switchRow("正文记忆联动", "已发生的交流与知情范围写入隐藏参考", "inject", s.settings.inject) : ""}${s ? switchRow("读取可知情的正文", "在场角色/明确允许的联系人可参考近期正文；其他私聊不混入", "read-narrative", s.settings.readNarrative) : ""}</div><div class="card"><h3 style="margin:0 0 6px">柏宝书联动</h3><p class="tiny muted">${e(bb ? bb.text : "不可用")}</p>${switchRow("启用柏宝书联动", "检测到「百宝月夜书」(≥1.3.0) 时双向联动；关闭后手机完全独立运行", "baibai-enabled", !!bb?.prefs.enabled)}${switchRow("剧情简报进入手机上下文", "主线变量缺失时用柏宝书的剧情时间/地点兜底；人物生成与规划可参考柏宝书分层摘要、锚点日记、未了结计划、NPC 档案（只给在场或被允许读正文的人物看摘要）", "baibai-brief", !!bb?.prefs.brief)}${switchRow("在场人物兜底", "主线变量没有“当前互动NPC”时，采用柏宝书推断的在场人物", "baibai-present", !!bb?.prefs.present)}${switchRow("手机交流回写柏宝书", "新消息、约定、动态、未完约定推送到柏宝书的【小手机】外部记录，参与其正文注入与摘要；不会改动柏宝书自身的记忆", "baibai-push", !!bb?.prefs.push)}<div class="buttons">${button("立即回写", "baibai-push-now")}${button("导入柏宝书记忆", "baibai-import-memory")}${button("导入柏宝书 API 方案", "baibai-import-api")}${button("经柏宝书测活渠道", "baibai-test")}</div><p class="form-note">只读取柏宝书公开的 window.STBaiBaiBook.phone 接口；柏宝书密钥不经过手机（“导入方案”除外，它会复制一份密钥到本机）。</p></div><p class="form-note">独立扩展与卡内脚本二选一即可；同页重复加载会复用实例。后台仅在酒馆页面仍开着时运行，标签页可能受浏览器节流。所有自动生成都计入你设置的调用预算。</p></div>`;
+    return `<div class="pad"><div class="card"><div style="display:flex;align-items:center;gap:12px"><span class="avatar sage">${icon("moon", 23)}</span><div><h3 style="margin:0">月夜来信</h3><small>TSUKIYO PHONE · ${VERSION}</small></div></div><div class="divider"></div><p class="tiny muted">${bridge.mode === "demo" ? "当前为离线演示。模拟消息不会写入真实酒馆。" : "手机与当前角色聊天相连；不把界面状态冒充主线事实。"}</p></div><div class="card">${settingLink("API方案与模块分配", "go", "settings", c.profiles.length + " 个方案" + (Object.keys(MODULES).filter((k) => !ui.engine.settings.isEnabled(k)).length ? " · " + Object.keys(MODULES).filter((k) => !ui.engine.settings.isEnabled(k)).length + " 个模块已关闭" : ""), "api")}${switchRow("正文下显示剧情规划条", "在最新一条角色回复下方显示当前面·线·点，可一键打开或推进；状态栏脚本也可读取 __TSUKIYO_PHONE__.plan()", "plan-strip", c.ui.planStrip !== false)}${settingLink("自定义提示词", "edit-prompt", "note", c.prompt?.enabled && c.prompt.text ? "已启用 · 每次请求最先发送" : "未启用")}${settingLink("后台、来信与剧情方向", "go", "bell", s?.settings.auto.enabled ? "已开启" : "未开启", "automation")}${settingLink("备份与恢复", "go", "download", "只操作本手机", "backup")}${settingLink("运行记录", "go", "file", "任务与失败可追踪", "logs")}${settingLink("存档与规划状态", "go", "memory", "三层存档 · 自动推进", "diag")}${settingLink("正文注入检查", "inspect-injection", "memory", bridge.injectionReady ? "接口已就绪" : "尚未确认")}</div><div class="card">${switchRow("夜间阅读", "只改变手机外观，不改变剧情时间", "theme", c.theme === "night")}${s ? switchRow("角色卡人物全部解锁", "月夜来信卡的全部联系人直接可用；关闭后按剧情逐个解锁", "unlock-all", s.settings.unlockAll) : ""}${s ? switchRow("正文记忆联动", "已发生的交流与知情范围写入隐藏参考", "inject", s.settings.inject) : ""}${s ? switchRow("读取可知情的正文", "在场角色/明确允许的联系人可参考近期正文；其他私聊不混入", "read-narrative", s.settings.readNarrative) : ""}</div><div class="card"><h3 style="margin:0 0 6px">柏宝书联动</h3><p class="tiny muted">${e(bb ? bb.text : "不可用")}</p>${switchRow("启用柏宝书联动", "检测到「百宝月夜书」(≥1.3.0) 时双向联动；关闭后手机完全独立运行", "baibai-enabled", !!bb?.prefs.enabled)}${switchRow("使用柏宝书记忆生成（实时读取）", "聊天、主动来信、朋友圈/评论、日记、备忘、清单、日历、规划与记忆整理可参考柏宝书；关闭后不再读取，也不使用带柏宝书标记的导入记忆。公开动态/群聊只取有限本人资料，不公开全局私密摘要", "baibai-brief", !!bb?.prefs.brief)}${switchRow("在场人物兜底", "主线变量没有“当前互动NPC”时，采用柏宝书推断的在场人物", "baibai-present", !!bb?.prefs.present)}${switchRow("手机交流回写柏宝书", "新消息、约定、动态、未完约定推送到柏宝书的【小手机】外部记录，参与其正文注入与摘要；不会改动柏宝书自身的记忆", "baibai-push", !!bb?.prefs.push)}<div class="buttons">${button("立即回写", "baibai-push-now")}${button("导入柏宝书记忆", "baibai-import-memory")}${button("导入柏宝书 API 方案", "baibai-import-api")}${button("经柏宝书测活渠道", "baibai-test")}</div><p class="form-note">只读取柏宝书公开的 window.STBaiBaiBook.phone 接口；柏宝书密钥不经过手机（“导入方案”除外，它会复制一份密钥到本机）。</p></div><p class="form-note">独立扩展与卡内脚本二选一即可；同页重复加载会复用实例。后台仅在酒馆页面仍开着时运行，标签页可能受浏览器节流。所有自动生成都计入你设置的调用预算。</p></div>`;
   }
   function apiView(ui) {
     const store = ui.engine.settings, c = store.data;

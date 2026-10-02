@@ -1,0 +1,28 @@
+{
+  "baseCommit": "9e42ccd68c0cc0ea7166d5b2f31553005ab61fe6",
+  "date": "2026-10-02",
+  "mainVersion": "1.3.3",
+  "phoneVersion": "1.6.2",
+  "deployment": "local delivery only; not pushed to GitHub or user server",
+  "tests": {
+    "vitest": 251,
+    "phoneMemoryCases": 24,
+    "extraAssertions": [
+      810,
+      12,
+      53
+    ],
+    "typecheck": "passed",
+    "localOnlyArtifactCheck": "passed",
+    "simulatedUI": "passed",
+    "realSTEndToEnd": "not performed"
+  },
+  "sha256": {
+    "manifest.json": "494ddaed3c61f89764e3d03008b3ded6d7a8e5349e0c0d62ca9e7414a4a14b9f",
+    "dist/index.js": "7eaeec4259865e49c5a1401572eae497d7061e98df4e0ab5de1b5f3519fe564e",
+    "dist/index.css": "d68e4d35a3a38361636a48541924e489fbf320e17ac515bfa2c860cc50fc066a",
+    "dist/index.js.map": "7965f77622fc30d2e3990bfe67ace0602f08dfbcc272c004ebc51eb900639981",
+    "phone/tsukiyo-phone-1.6.2.js": "1c7b050ef36793c42eb2516bfa336321a9e7fefc1174be6abbaf209759083001",
+    "phone/dist/月夜来信小手机_酒馆助手导入版_v1.6.2_柏宝书联动.json": "ab2c879612e4e657dae6cda76550b277b93f72662e75419f9bb832106badef96"
+  }
+}

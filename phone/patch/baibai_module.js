@@ -2,7 +2,7 @@
   // 百宝月夜书（ST-BaiBai-Book-Tsukiyo ≥1.3.0）联动：只读其公开 API，不触碰其内部数据；手机的一切改动都留在手机。
   var BAIBAI_SOURCE = "tsukiyo-phone";
   var BAIBAI_EVENTS = ["st-baibai-book:phone-update", "st-baibai-book:changed", "st-baibai-book:ready"];
-  var BAIBAI_BRIEF_ARGS = { historyChars: 2400, anchorChars: 1200 };
+  var BAIBAI_BRIEF_ARGS = { anchorChars: 1200 };
   var baibaiRuntime = { win: null, settings: () => null, enabled: true, cache: null, cacheAt: 0 };
   function baibaiCandidates(win) {
     const list = [];
@@ -52,7 +52,14 @@
     baibaiRuntime.cache = null;
     baibaiRuntime.cacheAt = 0;
   }
+  function baibaiReadEnabled() {
+    if (!baibaiPrefs().brief) return false;
+    const api = baibaiApi();
+    try { return !!api && (typeof api.isEnabled !== "function" || api.isEnabled()) && (typeof api.canReadMemory !== "function" || api.canReadMemory()); }
+    catch { return false; }
+  }
   function baibaiBrief(win = null, { maxAge = 2500 } = {}) {
+    if (!baibaiReadEnabled()) { baibaiInvalidate(); return null; }
     const api = baibaiApi(win);
     if (!api) return null;
     try {
@@ -106,27 +113,58 @@
     const body = text(p.content, 200);
     return body ? (p.kind ? "[" + text(p.kind, 12) + "] " : "") + body + (extra ? "（" + extra + "）" : "") : "";
   }
-  function baibaiActorBrief(contact, mainAllowed) {
-    if (!baibaiPrefs().brief) return void 0;
+  function baibaiActorBrief(contact, mainAllowed, { social = false, group = false } = {}) {
     const brief = baibaiBrief();
     if (!brief) return void 0;
-    let profile = "";
-    try {
-      profile = text(baibaiApi()?.getNpcProfile?.(contact.name) || "", 1200);
-    } catch {
+    // 未标注知情人的计划不凭姓名猜权限。公开动态/群聊不加入整份私密摘要。
+    const privateAllowed = !!mainAllowed && !social && !group;
+    const npc = (brief.npcs || []).find(n => n.name === contact.name);
+    let profile = npc ? { 姓名: npc.name, 称呼: text(npc.title, 80), 性格: text(npc.personality, 200) } : "（暂无本人资料）";
+    if (privateAllowed) {
+      try { profile = text(baibaiApi()?.getNpcProfile?.(contact.name) || "", 1200) || profile; } catch {}
     }
-    const plans = (Array.isArray(brief.plans) ? brief.plans : []).filter((p) => mainAllowed || String(p?.content || "").includes(contact.name)).map(baibaiPlanLine).filter(Boolean).slice(0, 6);
-    return { 来源: "柏宝书记忆引擎（只读；与正文冲突时以正文为准）", 剧情时间: baibaiClock(brief), 本人档案: profile || "（柏宝书尚未记录此人）", 相关未了结计划: plans, 近期剧情摘要: mainAllowed ? baibaiTail(brief.history, 1800) : "（本人不在场，不读取主线摘要）", 锚点日记: mainAllowed && brief.anchor && brief.anchor.text ? baibaiTail(brief.anchor.text, 800) : "" };
+    return { 来源: "柏宝书记忆（只读参考，不强制采用，不代表已公开或人人知情）", 剧情时间: baibaiClock(brief), 本人档案: profile,
+      相关未了结计划: privateAllowed ? (brief.plans || []).map(baibaiPlanLine).filter(Boolean).slice(0, 6) : [],
+      近期剧情摘要: privateAllowed ? baibaiTail(brief.history, 1800) : "（未授权或公开/群聊场景，不读取全局剧情摘要）",
+      锚点日记: privateAllowed && brief.anchor ? baibaiTail(brief.anchor.text, 800) : "",
+      本人生活细节: privateAllowed ? (brief.lifeDetails || []).filter(d => d.subject === contact.name).slice(0, 8).map(d => text(d.text, 160)) : [],
+      说明: "摘要是叙事参考，不是本人自动获知的事实。只使用亲历或明确获知的部分；群聊和公开动态不补入私聊秘密。" };
   }
   function baibaiPlanningBrief() {
-    if (!baibaiPrefs().brief) return void 0;
     const brief = baibaiBrief();
     if (!brief) return void 0;
-    return { 剧情时间: baibaiClock(brief), 地点: text(brief.location, 80), 在场: Array.isArray(brief.presentNpcs) ? brief.presentNpcs.slice(0, 12) : [], 未了结计划: (Array.isArray(brief.plans) ? brief.plans : []).map(baibaiPlanLine).filter(Boolean).slice(0, 8), 近期剧情摘要: baibaiTail(brief.history, 2e3), 锚点日记: brief.anchor && brief.anchor.text ? baibaiTail(brief.anchor.text, 600) : "", 说明: "来自柏宝书的分层摘要，用于把握时间线与伏笔；与【实际正文】冲突时以正文为准" };
+    return { 来源: "柏宝书记忆·实时只读", 剧情时间: baibaiClock(brief), 地点: text(brief.location, 80),
+      在场: (brief.presentNpcs || []).slice(0, 12), 未了结计划: (brief.plans || []).map(baibaiPlanLine).filter(Boolean).slice(0, 8),
+      近期剧情摘要: baibaiTail(brief.history, 2400), 锚点日记: brief.anchor ? baibaiTail(brief.anchor.text, 800) : "",
+      人物档案: (brief.npcs || []).slice(0, 12).map(n => ({ 姓名: n.name, 称呼: text(n.title, 80), 关系: text(n.relation, 100), 近况: text(n.condition, 120) })),
+      物品: (brief.items || []).slice(0, 15).map(i => ({ 名称: text(i.name, 80), 数量: i.qty, 所在: text(i.location, 80) })),
+      生活细节: (brief.lifeDetails || []).slice(0, 12).map(d => ({ 主语: text(d.subject, 40), 内容: text(d.text, 160) })),
+      说明: "可参考而非必须使用；以当前正文为准。计划不等于已发生，摘要不能替代逐字原文证据；不要凭提及姓名推断知情人。" };
+  }
+  // 每次生成重新读当前简报；过滤只发生在请求副本，不删除用户手机存档。
+  function baibaiFilterInput(data) {
+    baibaiInvalidate();
+    if (!baibaiReadEnabled()) data.memories = (data.memories || []).filter(m => !m.bb);
+    return data;
+  }
+  function baibaiEnrichRequest(module, request) {
+    if (!baibaiReadEnabled()) return request;
+    const payload = request.payload;
+    if (!isObject(payload)) return request;
+    // 聊天/主动来信/朋友圈由 actorContext 按人构建，不能再追加全知简报。
+    // 多人角色日记同样只使用各自角色资料中的参考。
+    if (["planner", "memory", "diary"].includes(module) && !payload.写日记的角色 && !payload.柏宝书) {
+      payload.柏宝书记忆参考 = baibaiPlanningBrief();
+    }
+    request.system += "\n柏宝书记忆是可选背景，不必强行套用；角色只采用本人已知事实，未执行计划不得写成完成。整理记忆或核对进度时，仍须满足原任务指定的消息ID/正文楼层/逐字引文证据，不能拿简报冒充原文。";
+    return request;
+  }
+  function baibaiMemoryCard() {
+    return `<div class="card"><h3>柏宝书 · 实时记忆参考</h3><p class="tiny muted">${baibaiReadEnabled() ? "读取已开启：生成时参考最新记忆，不必重复导入；公开动态与群聊不读取全局私密摘要。" : "读取已关闭或未连接：手机使用自身上下文。开启需要两边的读取开关均允许。"}</p><div class="buttons">${button("切换记忆读取", "baibai-brief")}${button("查看当前参考", "baibai-preview-memory")}</div></div>`;
   }
   function baibaiMemoryCandidates(brief, s) {
     const out = [];
-    const mention = (t) => ["user", ...s.contacts.filter((c) => c.name && t.includes(c.name)).map((c) => c.id)];
+    const mention = (_t) => ["user"]; // 导入副本默认仅玩家可见；知情人须由用户明确设置
     for (const p of Array.isArray(brief.plans) ? brief.plans : []) {
       const line = baibaiPlanLine(p);
       if (!line) continue;
@@ -237,9 +275,9 @@
       return rows;
     }
     async push({ force = false } = {}) {
-      if (!baibaiPrefs().push && !force) return null;
+      if (!baibaiPrefs().push) return null;
       const api = baibaiApi(), s = this.eng.repo.data, snap = this.eng.repo.snapshot;
-      if (!api || !s || !snap || this.busy) return null;
+      if (!api || !s || !snap || this.busy || (typeof api.isEnabled === "function" && !api.isEnabled())) return null;
       this.busy = true;
       try {
         const rows = this.notes(s, snap);
@@ -257,9 +295,9 @@
           const prev = existing.get(r.id);
           return prev && Number.isInteger(prev.floor) ? { ...r, floor: prev.floor } : r;
         });
+        if (!fresh.length) { this.lastSig = sig; return { added: 0, updated: 0, total: existing.size }; }
+        const r = await api.pushNotes(BAIBAI_SOURCE, fresh);
         this.lastSig = sig;
-        if (!fresh.length) return { added: 0, updated: 0, total: existing.size };
-        const r = api.pushNotes(BAIBAI_SOURCE, fresh);
         this.last = { at: Date.now(), ok: true, message: "", added: Number(r?.added) || 0, updated: Number(r?.updated) || 0 };
         baibaiInvalidate();
         this.eng.emit("status");

@@ -64,6 +64,7 @@ export interface PhoneBrief {
   weekday: string;
   location: string;
   protagonist: Record<string, string>;
+  items: Array<{ name: string; qty: number | null; location: string }>;
   npcs: PhoneNpcBrief[];
   presentNpcs: string[];
   plans: PhonePlanBrief[];
@@ -104,8 +105,9 @@ function daysLeft(now: string, target: string): number | null {
 
 /** 剧情简报:手机侧一次调用拿齐"现在是什么时候、在哪、谁在、关系如何、之前发生过什么" */
 export function getBrief(options: { historyChars?: number; anchorChars?: number } = {}): PhoneBrief {
-  const snap = getSnapshot();
   const s = apiSettings.phoneBridge;
+  if (!s.enabled || !s.shareMemory) throw new Error('柏宝书记忆读取已关闭');
+  const snap = getSnapshot();
   const historyChars = Math.max(0, options.historyChars ?? s.briefHistoryChars);
   const anchorChars = Math.max(0, options.anchorChars ?? 1500);
   const here = snap.state.location ?? '';
@@ -148,6 +150,7 @@ export function getBrief(options: { historyChars?: number; anchorChars?: number 
     weekday: snap.state.time ? weekdayLabel(snap.state.time) : '',
     location: here,
     protagonist,
+    items: snap.items.map(i => ({ name: i.name, qty: i.qty ?? null, location: i.location ?? '' })),
     npcs,
     presentNpcs: npcs.filter(n => n.present).map(n => n.name),
     plans,
@@ -160,6 +163,7 @@ export function getBrief(options: { historyChars?: number; anchorChars?: number 
 
 /** 单个 NPC 的人设卡文本(手机 actorContext 用) */
 export function getNpcProfile(name: string): string {
+  if (!apiSettings.phoneBridge.enabled || !apiSettings.phoneBridge.shareMemory) return '';
   const key = String(name ?? '').trim();
   if (!key) return '';
   const n = memory.npcs.find(x => x.name === key) ?? memory.npcs.find(x => key.includes(x.name) || x.name.includes(key));
@@ -250,6 +254,7 @@ export interface PhoneBridgeApi {
   testChannel(channelId: string, phrase?: string): Promise<{ ok: boolean; message: string }>;
   exportChannel(channelId: string): { id: string; name: string; url: string; key: string; model: string; temperature: number; maxTokens: number };
   isEnabled(): boolean;
+  canReadMemory(): boolean;
 }
 
 export function createPhoneApi(): PhoneBridgeApi {
@@ -258,6 +263,7 @@ export function createPhoneApi(): PhoneBridgeApi {
     getBrief,
     getNpcProfile,
     getAnchor: () => {
+      if (!apiSettings.phoneBridge.enabled || !apiSettings.phoneBridge.shareMemory) return null;
       const a = currentAnchor();
       return a ? { version: a.version, floor: a.floor, text: a.text } : null;
     },
@@ -268,6 +274,7 @@ export function createPhoneApi(): PhoneBridgeApi {
     testChannel,
     exportChannel,
     isEnabled: () => !!apiSettings.phoneBridge.enabled,
+    canReadMemory: () => !!apiSettings.phoneBridge.enabled && !!apiSettings.phoneBridge.shareMemory,
   });
 }
 

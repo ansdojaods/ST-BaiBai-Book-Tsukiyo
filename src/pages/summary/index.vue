@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Icon from '@/components/Icon.vue';
+import { beginManualFloorSummary, addManualFloorSummary, type ManualFloorTicket } from '@/memory/manual';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import { addSummary, appendOpToLatestLeaf, deleteLeafAt, deleteSummary, deleteSummarySubtrees, editLeafAt, editPlan, editSummary, invalidateSummaryAncestors } from '@/memory/apply';
@@ -12,7 +13,7 @@ import { derivedMeta, memory, recomputeDerived } from '@/memory/store';
 import type { SceneFocus } from '@/memory/types';
 import { getContext } from '@/st/context';
 import { toast } from '@/st/toast';
-import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, shallowRef } from 'vue';
 import SummaryNode from './SummaryNode.vue';
 import { SUMMARY_CTX, type SummaryRow } from './ctx';
 
@@ -26,6 +27,7 @@ const resetViewStates = () => {
   searchQuery.value = '';
   searchOpen.value = false;
   closeImportHistory();
+  closeManualSummary();
   exitSelectMode();
 };
 let offChatChanged: (() => void) | null = null;
@@ -225,6 +227,33 @@ function summarizeOne(floor: number) {
   if (engineState.running || summarizingFloor.value !== null) return;
   // 任务状态由 engine 的 floorBackfillState 维护;页面卸载/重开不会丢失。
   void summarizeFloor(floor);
+}
+
+/* 手写补摘不调用 AI；ticket 用 shallowRef，避免代理化聊天对象破坏身份校验。 */
+const manualTicket = shallowRef<ManualFloorTicket | null>(null);
+const manualSummaryText = ref('');
+const manualStart = ref('');
+const manualEnd = ref('');
+function closeManualSummary() {
+  manualTicket.value = null;
+  manualSummaryText.value = '';
+  manualStart.value = '';
+  manualEnd.value = '';
+}
+function openManualSummary(floor: number) {
+  try {
+    const ticket = beginManualFloorSummary(floor);
+    closeManualSummary();
+    manualTicket.value = ticket;
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'warning'); }
+}
+function saveManualSummary() {
+  if (!manualTicket.value) return;
+  try {
+    addManualFloorSummary(manualTicket.value, manualSummaryText.value, manualStart.value, manualEnd.value);
+    closeManualSummary();
+    toast('手写摘要已添加，未调用 AI；物品、角色等结构化信息未自动推断', 'success');
+  } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
 }
 
 /* ============ 批量补摘 ============
@@ -1057,21 +1086,36 @@ provide(SUMMARY_CTX, {
           </button>
         </span>
       </div>
+      <p class="bbs-field-hint">无法使用 AI 时，点击「手写」直接补摘要。#楼层号与下方摘要列表一致；AI补摘仍可单独使用。</p>
       <div class="bbs-pending-chips">
-        <button
-          v-for="f in pendingFloors"
-          :key="f"
-          class="bbs-pending-chip"
-          type="button"
-          :disabled="engineState.running || summarizingFloor !== null || batchState.running"
-          :title="`对楼层 #${f} 生成摘要`"
-          @click="summarizeOne(f)"
-        >
-          <span v-if="summarizingFloor === f" class="bbs-pending-spin"></span>
-          <template v-else>#{{ f }}</template>
-        </button>
+        <div v-for="f in pendingFloors" :key="f" class="bbs-manual-floor-actions">
+          <span class="bbs-manual-floor-label">#{{ f }}</span>
+          <button class="bbs-pending-chip" type="button"
+            :disabled="engineState.running || summarizingFloor !== null || batchState.running"
+            :title="`调用 AI 为楼层 #${f} 生成摘要`" @click="summarizeOne(f)">
+            <span v-if="summarizingFloor === f" class="bbs-pending-spin"></span>
+            <template v-else>AI补摘</template>
+          </button>
+          <button class="bbs-btn bbs-btn-sm" type="button" :disabled="engineState.running || batchState.running"
+            :title="`手写楼层 #${f} 的摘要，不调用AI`" @click="openManualSummary(f)">手写</button>
+        </div>
       </div>
     </div>
+
+    <ModalMask :open="!!manualTicket" @close="closeManualSummary">
+      <div v-if="manualTicket" class="bbs-modal" role="dialog" aria-modal="true" aria-label="手写楼层摘要">
+        <header class="bbs-modal-head"><span class="bbs-modal-title">手写补摘 · 楼层 #{{ manualTicket.floor }}</span>
+          <button class="bbs-btn" type="button" @click="closeManualSummary">关闭</button></header>
+        <p class="bbs-field-hint">无需 API。请概括本楼真实发生的事；不会自动生成物品、角色、变量变化，也不会立即触发AI压缩。原消息正文不会被修改。</p>
+        <details class="bbs-manual-source"><summary>查看该楼原文</summary><pre>{{ manualTicket.body }}</pre></details>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">摘要正文（必填）</span>
+          <textarea v-model="manualSummaryText" class="bbs-input bbs-modal-textarea" rows="8" maxlength="60000" placeholder="例如：两人在咖啡馆见面，约定周六再讨论旅行计划。计划尚未执行。"></textarea></label>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">开始时间（可选，留空优先用本楼时间标签）</span><input v-model="manualStart" class="bbs-input" maxlength="200" /></label>
+        <label class="bbs-modal-field"><span class="bbs-modal-label">结束时间（可选）</span><input v-model="manualEnd" class="bbs-input" maxlength="200" /></label>
+        <footer class="bbs-modal-foot"><button class="bbs-btn" type="button" @click="closeManualSummary">取消</button>
+          <button class="bbs-btn bbs-btn-primary" type="button" :disabled="!manualSummaryText.trim() || engineState.running || batchState.running" @click="saveManualSummary">保存手写摘要</button></footer>
+      </div>
+    </ModalMask>
 
     <!-- 批量补摘确认弹窗 -->
     <ConfirmDialog
@@ -1185,7 +1229,7 @@ provide(SUMMARY_CTX, {
     </div>
     <div v-else class="bbs-empty">
       <span class="bbs-empty-icon"><Icon name="summary" /></span>
-      <p>还没有摘要。对话累积到设定楼层后会自动生成,也可在「未摘要楼层」里点楼层号单独补摘。</p>
+      <p>还没有摘要。对话累积到设定楼层后会自动生成,也可在「未摘要楼层」选择AI补摘或手写（无需API）。</p>
     </div>
 
     <!-- 选择模式底部操作条:显示已选统计 + 全选/删除/合并。sticky 在页面底部 -->
@@ -2251,4 +2295,10 @@ provide(SUMMARY_CTX, {
     gap: 0;
   }
 }
+</style>
+
+<style scoped>
+.bbs-manual-floor-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px; border: 1px solid var(--bbs-border); border-radius: 8px; }
+.bbs-manual-floor-label { font-weight: 600; padding: 0 4px; }
+.bbs-manual-source pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; font-size: 12px; }
 </style>

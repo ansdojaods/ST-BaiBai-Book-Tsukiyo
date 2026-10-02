@@ -17,9 +17,10 @@ describe('hydrateSettings', () => {
     const stored = defaults();
     stored.anchor.triggerPhrase = '写日记';
     stored.anchor.injectDepth = 9;
-    stored.backend.namespace = 'my-space';
-    stored.backend.autoBackup = true;
+    stored.backend.restorePoints = 6;
+    stored.backend.trashKeep = 42;
     stored.phoneBridge.enabled = false;
+    stored.phoneBridge.shareMemory = false;
     stored.phoneBridge.briefHistoryChars = 1234;
     stored.backlogPolicy = 'block';
     stored.backlogWaitSec = 5;
@@ -37,9 +38,10 @@ describe('hydrateSettings', () => {
 
     expect(apiSettings.anchor.triggerPhrase).toBe('写日记');
     expect(apiSettings.anchor.injectDepth).toBe(9);
-    expect(apiSettings.backend.namespace).toBe('my-space');
-    expect(apiSettings.backend.autoBackup).toBe(true);
+    expect(apiSettings.backend.restorePoints).toBe(6);
+    expect(apiSettings.backend.trashKeep).toBe(42);
     expect(apiSettings.phoneBridge.enabled).toBe(false);
+    expect(apiSettings.phoneBridge.shareMemory).toBe(false);
     expect(apiSettings.phoneBridge.briefHistoryChars).toBe(1234);
     expect(apiSettings.backlogPolicy).toBe('block');
     expect(apiSettings.backlogWaitSec).toBe(5);

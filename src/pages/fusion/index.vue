@@ -14,15 +14,13 @@ import { anchorState, currentAnchor, setAnchorExcluded, updateAnchorText, addAnc
 import { deleteAnchorToTrash, generateAnchorSilently, insertTriggerIntoInput, extractAnchorBlock, effectiveInstruction } from '@/anchor/engine';
 import { DEFAULT_ANCHOR_INSTRUCTION } from '@/anchor/prompts';
 import { refreshInjection } from '@/memory/inject';
-import { backendState, probeBackend } from '@/backend/bainiao';
-import { syncState, backupSnapshotToBackend, restoreSnapshotFromBackend, listRemoteSnapshots, deleteRemoteSnapshot, pullTrashMirror, type RemoteSnapshotInfo } from '@/backend/sync';
 import { restoreState, createRestorePoint, restoreFromPoint, deleteRestorePoint, buildSnapshot, parseSnapshot, applySnapshot, restoreTrashEntry } from '@/backend/restore';
 import { trashState, trashRemove, trashClear, trashPush } from '@/backend/trash';
 import { buildDiagnostics, downloadJson, copyText } from '@/backend/diagnostics';
 import { externalState, removeExternalNote, clearExternal, setExternalPinned, pushExternalNotes } from '@/bridge/external';
 import { getBrief, listChannels, testChannel as testPhoneChannel, listPhoneProfiles, importPhoneProfile } from '@/bridge/phone';
 import { newChannel } from '@/api/settings';
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 
 type Tab = 'anchor' | 'backup' | 'phone';
 const tab = ref<Tab>('anchor');
@@ -125,8 +123,6 @@ async function copyAnchor(e: AnchorEntry) {
 }
 
 /* ================= 备份恢复 ================= */
-const remote = ref<RemoteSnapshotInfo[]>([]);
-const remoteLoading = ref(false);
 const confirm = ref<{ title: string; body: string; action: () => void | Promise<void> } | null>(null);
 const importOpen = ref(false);
 const importText = ref('');
@@ -143,43 +139,6 @@ async function runConfirm() {
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e), 'error');
   }
-}
-async function reprobe() {
-  await probeBackend(true);
-  toast(backendState.available ? `白鸟数据后端可用(v${backendState.health?.version || '?'})` : `后端不可用:${backendState.lastError || '未知'}`, backendState.available ? 'success' : 'warning');
-}
-async function doBackup() {
-  try {
-    await backupSnapshotToBackend(true);
-    toast(`已备份到后端(revision ${syncState.lastBackupRevision})`, 'success');
-    void loadRemote();
-  } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), 'error');
-  }
-}
-function doRestoreRemote(recordId?: string) {
-  ask('从后端恢复', '将用后端快照整份覆盖当前聊天的记忆(摘要/叶子/锚点/外部记录)。恢复前会自动保存一个恢复点。继续?', async () => {
-    const r = await restoreSnapshotFromBackend(recordId);
-    toast(`已恢复:${r.snapshot.summaries.length} 个总结节点、${r.snapshot.leaves.length} 条叶子${r.skippedLeaves ? `(${r.skippedLeaves} 条叶子因楼层不存在跳过)` : ''}`, 'success');
-  });
-}
-async function loadRemote() {
-  if (!backendState.available) return;
-  remoteLoading.value = true;
-  try {
-    remote.value = await listRemoteSnapshots();
-  } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), 'error');
-  } finally {
-    remoteLoading.value = false;
-  }
-}
-function delRemote(r: RemoteSnapshotInfo) {
-  ask('删除后端快照', `删除「${r.charName || r.recordId}」的快照?它会进入后端回收站(30 天内可在服务器目录找回)。`, async () => {
-    await deleteRemoteSnapshot(r.recordId);
-    toast('已删除', 'info');
-    void loadRemote();
-  });
 }
 function makePoint() {
   const pt = createRestorePoint('手动保存');
@@ -228,14 +187,6 @@ function dropTrash(id: string) {
 }
 function clearAllTrash() {
   ask('清空回收站', '彻底删除回收站里的全部条目?', () => trashClear());
-}
-async function pullTrash() {
-  try {
-    const n = await pullTrashMirror();
-    toast(`已从后端取回 ${n} 条回收站记录`, 'success');
-  } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), 'error');
-  }
 }
 async function diagCopy() {
   const ok = await copyText(JSON.stringify(buildDiagnostics(PLUGIN_VERSION), null, 2));
@@ -311,9 +262,6 @@ const phoneDetected = computed(() => {
   return !!es?.tsukiyo_phone;
 });
 
-onMounted(() => {
-  void probeBackend().then(() => loadRemote());
-});
 </script>
 
 <template>
@@ -373,44 +321,13 @@ onMounted(() => {
 
     <!-- ===================== 备份恢复 ===================== -->
     <div v-else-if="tab === 'backup'">
-      <p class="bbs-fu-hint">柏宝书仍是纯前端扩展。装了「白鸟数据」服务端插件时,这里可以把整份记忆备份到服务器目录并随时恢复;没装也能用本地恢复点、回收站、导出/导入文件。</p>
-      <div class="bbs-fu-status" :class="backendState.available ? 'bbs-fu-status-ok' : 'bbs-fu-status-off'">
-        <span>白鸟数据后端:{{ backendState.checking ? '检测中…' : backendState.available ? `可用(v${backendState.health?.version || '?'})` : '不可用' }}</span>
-        <button class="bbs-btn" type="button" @click="reprobe">重新检测</button>
-      </div>
-      <p v-if="!backendState.available && backendState.lastError" class="bbs-fu-note">{{ backendState.lastError }}。安装方法:把 ST-BaiNiaoData 克隆到 SillyTavern 的 plugins/ 目录,并在 config.yaml 打开 enableServerPlugins。</p>
-
-      <Collapsible title="后端设置" :open="false">
-        <label class="bbs-fu-switch"><span>允许使用白鸟后端</span><input v-model="b.enabled" type="checkbox" class="bbs-fu-check" /></label>
-        <label class="bbs-fu-switch"><span>每次摘要后自动备份快照(安静 20 秒后执行)</span><input v-model="b.autoBackup" type="checkbox" class="bbs-fu-check" /></label>
+      <p class="bbs-fu-hint">无需额外服务器插件。恢复点和回收站随当前聊天保存；文件导出可下载到自己的设备。已移除白鸟远程后端与网络探测。</p>
+      <Collapsible title="恢复与回收站设置" :open="false">
         <div class="bbs-fu-grid2">
-          <label class="bbs-fu-field"><span class="bbs-fu-label">命名空间</span><input v-model="b.namespace" class="bbs-input" type="text" /></label>
-          <label class="bbs-fu-field"><span class="bbs-fu-label">本地恢复点上限</span><input v-model.number="b.restorePoints" class="bbs-input" type="number" min="1" max="10" /></label>
+          <label class="bbs-fu-field"><span class="bbs-fu-label">恢复点上限</span><input v-model.number="b.restorePoints" class="bbs-input" type="number" min="1" max="10" /></label>
           <label class="bbs-fu-field"><span class="bbs-fu-label">回收站条数上限</span><input v-model.number="b.trashKeep" class="bbs-input" type="number" min="5" max="200" /></label>
         </div>
       </Collapsible>
-
-      <h3 class="bbs-fu-sub">后端快照</h3>
-      <div class="bbs-fu-actions">
-        <button class="bbs-btn bbs-btn-primary" type="button" :disabled="!backendState.available || syncState.busy" @click="doBackup">{{ syncState.busy ? '备份中…' : '立即备份当前聊天' }}</button>
-        <button class="bbs-btn" type="button" :disabled="!backendState.available" @click="doRestoreRemote()">从后端恢复当前聊天</button>
-        <button class="bbs-btn" type="button" :disabled="!backendState.available || remoteLoading" @click="loadRemote">{{ remoteLoading ? '读取中…' : '刷新列表' }}</button>
-      </div>
-      <p v-if="syncState.lastBackupAt" class="bbs-fu-note">上次备份:{{ fmtTime(syncState.lastBackupAt) }}(revision {{ syncState.lastBackupRevision }})</p>
-      <p v-if="syncState.lastError" class="bbs-fu-err">{{ syncState.lastError }}</p>
-      <div v-if="backendState.available && !remote.length" class="bbs-empty">后端上还没有快照。</div>
-      <div v-for="r in remote" :key="r.recordId" class="bbs-fu-row">
-        <div class="bbs-fu-row-main">
-          <strong>{{ r.charName || '(未知角色)' }}</strong>
-          <span class="bbs-fu-badge bbs-fu-badge-on" v-if="r.isCurrent">当前聊天</span>
-          <div class="bbs-fu-row-sub">{{ r.chatId }} · {{ r.floors }} 楼 · {{ r.summaries }} 个总结节点 · {{ r.anchors }} 版锚点 · rev {{ r.revision }} · {{ fmtTime(r.updatedAt) }}</div>
-        </div>
-        <div class="bbs-fu-card-acts">
-          <button class="bbs-fu-act" type="button" title="恢复到当前聊天" @click="doRestoreRemote(r.recordId)"><Icon name="download" /></button>
-          <button class="bbs-fu-act bbs-fu-act-del" type="button" title="删除" @click="delRemote(r)"><Icon name="trash" /></button>
-        </div>
-      </div>
-
       <div class="bbs-rule" />
       <h3 class="bbs-fu-sub">本地恢复点(批量补摘 / 导入 / 恢复前自动保存)</h3>
       <div class="bbs-fu-actions">
@@ -434,7 +351,6 @@ onMounted(() => {
       <h3 class="bbs-fu-sub">回收站({{ trashState.items.length }})</h3>
       <div class="bbs-fu-actions">
         <button class="bbs-btn" type="button" :disabled="!trashState.items.length" @click="clearAllTrash">清空</button>
-        <button class="bbs-btn" type="button" :disabled="!backendState.available" @click="pullTrash">从后端镜像取回</button>
       </div>
       <div v-if="!trashState.items.length" class="bbs-empty">回收站是空的。删除摘要/总结/锚点/外部记录时会先进这里。</div>
       <div v-for="it in trashState.items" :key="it.id" class="bbs-fu-row">
@@ -450,7 +366,7 @@ onMounted(() => {
 
       <div class="bbs-rule" />
       <h3 class="bbs-fu-sub">诊断</h3>
-      <p class="bbs-fu-hint">导出插件版本、关键设置(密钥脱敏)、后端健康、记忆统计与最近错误,不含聊天正文。反馈问题时附上即可。</p>
+      <p class="bbs-fu-hint">导出插件版本、关键设置(密钥脱敏)、记忆统计与最近错误,不含聊天正文。反馈问题时附上即可。</p>
       <div class="bbs-fu-actions">
         <button class="bbs-btn" type="button" @click="diagCopy">复制诊断信息</button>
         <button class="bbs-btn" type="button" @click="diagDownload">下载诊断文件</button>
@@ -464,6 +380,8 @@ onMounted(() => {
         <span>小手机脚本:{{ phoneDetected ? '已检测到(tsukiyo_phone 设置存在)' : '未检测到(需安装 1.6 联动版脚本并打开过一次手机)' }}</span>
       </div>
       <label class="bbs-fu-switch"><span>启用小手机联动(关闭后 STBaiBaiBook.phone 的写入与借用渠道都会拒绝)</span><input v-model="p.enabled" type="checkbox" class="bbs-fu-check" /></label>
+      <label class="bbs-fu-switch"><span>允许小手机读取柏宝书记忆（不影响手机回写开关）</span><input v-model="p.shareMemory" type="checkbox" class="bbs-fu-check" /></label>
+      <p class="bbs-fu-hint">手机设置中另有「使用柏宝书记忆生成」开关。两边都开启时，手机各生成模块按知情范围读取记忆，无需额外服务器插件。</p>
       <Collapsible title="联动设置" :open="false">
         <label class="bbs-fu-switch"><span>把外部记录注入主模型</span><input v-model="p.injectExternal" type="checkbox" class="bbs-fu-check" /></label>
         <label class="bbs-fu-switch"><span>外部记录作为摘要/总结材料</span><input v-model="p.includeInSummary" type="checkbox" class="bbs-fu-check" /></label>

@@ -88,18 +88,8 @@ export interface AnchorSettings {
   maxChars: number;
 }
 
-/**
- * 数据后端 / 备份(思路来自白鸟数据后端 + 世界背面的恢复点,独立实现):
- * 柏宝书仍是纯前端扩展;若用户装了 ST-BaiNiaoData 服务端插件,可把记忆快照备份到服务器目录、
- * 走乐观并发与回收站;未装时所有功能自动回落到本地(chatMetadata)。
- */
+/** 本地恢复设置。保留 backend 键名以迁移旧存档；不再提供远程服务。 */
 export interface BackendSettings {
-  /** 允许使用白鸟后端(检测到才生效;关=只用本地) */
-  enabled: boolean;
-  /** 每次总结/批量补摘完成后自动备份一份快照到后端 */
-  autoBackup: boolean;
-  /** 后端命名空间(逻辑隔离,不是安全边界) */
-  namespace: string;
   /** 本地恢复点上限(每聊天;删旧留新) */
   restorePoints: number;
   /** 本地回收站保留条数上限 */
@@ -112,6 +102,8 @@ export interface BackendSettings {
  * 按预算注入主模型、并作为摘要材料,让正文、摘要与手机三端共享同一份记忆。
  */
 export interface PhoneBridgeSettings {
+  /** 允许手机读取柏宝书记忆；与手机回写独立 */
+  shareMemory: boolean;
   /** 联动总开关 */
   enabled: boolean;
   /** 把外部记录注入主模型 */
@@ -481,10 +473,10 @@ export function defaultAnchor(): AnchorSettings {
   };
 }
 export function defaultBackend(): BackendSettings {
-  return { enabled: true, autoBackup: false, namespace: 'baibai-book', restorePoints: 3, trashKeep: 30 };
+  return { restorePoints: 3, trashKeep: 30 };
 }
 export function defaultPhoneBridge(): PhoneBridgeSettings {
-  return { enabled: true, injectExternal: true, externalMaxChars: 2500, includeInSummary: true, briefHistoryChars: 2400 };
+  return { shareMemory: true, enabled: true, injectExternal: true, externalMaxChars: 2500, includeInSummary: true, briefHistoryChars: 2400 };
 }
 
 function intIn(v: unknown, lo: number, hi: number, d: number): number {
@@ -514,15 +506,13 @@ function normalizeFusion(raw: Partial<ApiSettings>, merged: ApiSettings): void {
   const b = (raw.backend ?? {}) as Partial<BackendSettings>;
   const db = defaultBackend();
   merged.backend = {
-    enabled: boolOr(b.enabled, db.enabled),
-    autoBackup: boolOr(b.autoBackup, db.autoBackup),
-    namespace: /^[A-Za-z0-9_-]{1,64}$/.test(String(b.namespace ?? '')) ? String(b.namespace) : db.namespace,
     restorePoints: intIn(b.restorePoints, 1, 10, db.restorePoints),
     trashKeep: intIn(b.trashKeep, 5, 200, db.trashKeep),
   };
   const p = (raw.phoneBridge ?? {}) as Partial<PhoneBridgeSettings>;
   const dp = defaultPhoneBridge();
   merged.phoneBridge = {
+    shareMemory: boolOr(p.shareMemory, dp.shareMemory),
     enabled: boolOr(p.enabled, dp.enabled),
     injectExternal: boolOr(p.injectExternal, dp.injectExternal),
     externalMaxChars: intIn(p.externalMaxChars, 200, 20000, dp.externalMaxChars),

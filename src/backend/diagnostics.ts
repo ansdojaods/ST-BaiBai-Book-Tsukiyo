@@ -10,8 +10,6 @@ import { memory, derivedMeta } from '@/memory/store';
 import { engineState } from '@/memory/engine';
 import { anchorState } from '@/anchor/store';
 import { externalState } from '@/bridge/external';
-import { backendState } from './bainiao';
-import { syncState } from './sync';
 import { restoreState } from './restore';
 import { trashState } from './trash';
 
@@ -84,10 +82,8 @@ export function buildDiagnostics(pluginVersion: string): Record<string, unknown>
       lastPushAt: externalState.lastPushAt ? new Date(externalState.lastPushAt).toISOString() : '',
       settings: s.phoneBridge,
     },
-    backend: {
+    localRecovery: {
       settings: s.backend,
-      health: backendState.health,
-      sync: { ...syncState },
       restorePoints: restoreState.points.map(p => ({ id: p.id, createdAt: new Date(p.createdAt).toISOString(), reason: p.reason, floors: p.snapshot.floors })),
       trashItems: trashState.items.length,
     },

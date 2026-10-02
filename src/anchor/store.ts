@@ -6,7 +6,7 @@
  *  - 当前生效锚点 = 最新一条未被排除的版本;
  *  - 删除走回收站(backend/trash),误删可恢复。
  *
- * 不依赖任何服务端:白鸟后端存在时另有一份镜像备份(见 backend/sync)。
+ * 不依赖额外服务端插件；随当前聊天保存。
  */
 import { reactive } from 'vue';
 import { getContext } from '@/st/context';

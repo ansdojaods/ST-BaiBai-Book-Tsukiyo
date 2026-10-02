@@ -1,19 +1,31 @@
-# 百宝月夜书(v1.3.2)
+# 百宝月夜书 v1.3.3 · 本地改版
 
-> 基于 [柏柏的 ST-BaiBai-Book v1.2.9](https://github.com/baibai-git/ST-BaiBai-Book) 的非官方分支(原名「融合版」,曾名「柏宝书-月夜来信版」,现更名为「百宝月夜书」,仓库 / 文件夹名 `ST-BaiBai-Book-Tsukiyo`)。**仍是纯前端 UI 扩展**,安装方式与原版相同(扩展 → 安装扩展 → 填本仓库地址 `https://github.com/ansdojaods/ST-BaiBai-Book-Tsukiyo`)。
-> 新增:锚点日记(手动挡记忆)、白鸟数据可选后端备份 / 恢复点 / 回收站 / 诊断导出、API 渠道测活留痕,以及与「月夜来信小手机」的双向联动。
+基于 `ansdojaods/ST-BaiBai-Book-Tsukiyo` 的 `9e42ccd`，配套月夜来信手机1.6.2。本地交付版本，未自动推送GitHub。
 
-| 新增 | 在哪 | 说明文档 |
-| --- | --- | --- |
-| 锚点日记:催更一次生成 `<anchor>` 剧情存档卡,版本化、可编辑 / 排除 / 回滚、正文隐藏标签、可替代锚点范围内的历史摘要 | 侧栏「联动」页 → 锚点日记 | [docs/FUSION.md §2](docs/FUSION.md) |
-| 备份与恢复:本地恢复点(默认 3 个)、回收站、可选的白鸟数据服务端快照(乐观并发)、诊断包 | 「联动」页 → 数据后端 | [docs/FUSION.md §3](docs/FUSION.md) |
-| 渠道测活:每渠道自定义测活短语、结果留存、一键全部测活、从小手机导入 API 方案 | 设置页 / 「联动」页 | [docs/FUSION.md §4](docs/FUSION.md) |
-| 小手机联动:`window.STBaiBaiBook.phone` 简报 / 外部记录 / 借用渠道;手机 1.6.1 补丁与导入 JSON | 「联动」页 → 小手机联动;`phone/` | [docs/PHONE_BRIDGE.md](docs/PHONE_BRIDGE.md) · [phone/README.md](phone/README.md) |
-| 摘要失败不拦截正文(1.3.2):前面楼层漏摘时默认照常生成,只等上一楼摘要最多 20 秒,缺口后台逐楼追补;原版「拦截并插提示楼」改为可选 | 设置页 → 摘要设置 → 摘要缺口时 | [docs/FUSION.md §6.1](docs/FUSION.md) |
+## 本次调整
 
-快速开始:`npm install && npm test && npm run build`(`dist/` 已随仓库提交,可直接安装)。仓库地址已配置:`REMOTE_MANIFEST_URL` 与 `homePage` 已指向 `ansdojaods/ST-BaiBai-Book-Tsukiyo`,迁移仓库时需同步修改并重新构建。
+- **手写补摘**：摘要页 → 未摘要楼层 → 手写。给现有AI楼层填写摘要，不调用AI、不会覆盖其他有效摘要。
+- **可选实时手机记忆读取**：主扩展「允许小手机读取柏宝书记忆」与手机「使用柏宝书记忆生成」控制，覆盖消息、朋友圈、日记、规划等入口；读与回写独立。
+- **移除白鸟远程后端**：不再探测白鸟服务，不显示404和远程备份设置；保留恢复点、回收站、文件导入导出，不需要额外服务器插件。
+
+**完整安装、操作、隐私范围与已知限制：[docs/LOCAL_EDITION_1.3.3.md](docs/LOCAL_EDITION_1.3.3.md)。**
+
+手写摘要不自动推断物品/角色等结构化变化。手机生成仍需原有LLM渠道。公共动态与群聊只用有限参考，不直接塞入全局私密摘要。此次不是上一轮审查所有问题的完整修复，先备份再更新。
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run check:local
+npm run build:phone
+npm run test:phone-ui
+```
+
+主扩展发布需含`dist/`及`manifest.json`。手机导入包由`build:phone`生成至`phone/dist/`；不要与旧卡内手机同时启用。源码改动见`src/memory/manual.ts`、摘要页、`src/bridge/phone.ts`与`phone/patch/`。
 
 **授权说明**:原版 ST-BaiBai-Book 未附带开源许可证,本分支仅供个人使用与向原作者提交合并请求参考;「柏宝书」名称与原版代码版权归柏柏所有;锚点日记为概念重写(原插件 AnchorNote 作者要求二改请先告知);世界背面(world-backstage)为保留所有权利的项目,本分支**未使用**其任何源码、提示词或文案,只独立实现了公开描述过的思路。
+
 
 ---
 

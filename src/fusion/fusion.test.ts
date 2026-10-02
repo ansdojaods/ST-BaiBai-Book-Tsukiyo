@@ -12,7 +12,6 @@ import { dueHint, fmtPlans } from '@/memory/prompts';
 import { extractAnchorBlock, harvestAnchorAt, handleAnchorIntercept } from '@/anchor/engine';
 import { addAnchor, anchorState, buildAnchorInjectionText, currentAnchor, loadAnchors, setAnchorExcluded, ANCHOR_META_KEY } from '@/anchor/store';
 import { buildExternalInjectionText, buildExternalSummaryMaterial, externalState, loadExternal, pushExternalNotes, selectExternalNotes } from '@/bridge/external';
-import { safeSegment } from '@/backend/bainiao';
 import { loadTrash, trashPush, trashState } from '@/backend/trash';
 import { buildSnapshot, createRestorePoint, loadRestorePoints, restoreFromPoint, restoreState, restoreTrashEntry, parseSnapshot } from '@/backend/restore';
 import { deleteSummary } from '@/memory/apply';
@@ -58,15 +57,15 @@ describe('设置兜底:老数据没有融合字段时回退默认', () => {
     const n = normalize({ channels: [{ id: 'c1', name: 'x', url: 'https://a.b', key: '', model: 'm' }] } as never);
     expect(n.anchor.triggerPhrase).toBe('请生成锚点日记');
     expect(n.anchor.injectDepth).toBe(4);
-    expect(n.backend.namespace).toBe('baibai-book');
+    expect(n.backend).not.toHaveProperty('namespace');
     expect(n.backend.restorePoints).toBe(3);
     expect(n.phoneBridge.externalMaxChars).toBe(2500);
     expect(n.channels[0].testPrompt).toBe('');
     expect(n.channels[0].lastTest).toBeUndefined();
   });
-  it('非法命名空间 / 越界数值被纠正', () => {
+  it('旧远程设置被丢弃 / 本地越界数值被纠正', () => {
     const n = normalize({ backend: { namespace: '有/斜杠', restorePoints: 99, trashKeep: 1 }, anchor: { injectDepth: -5, maxChars: 10 } } as never);
-    expect(n.backend.namespace).toBe('baibai-book');
+    expect(n.backend).not.toHaveProperty('namespace');
     expect(n.backend.restorePoints).toBe(10);
     expect(n.backend.trashKeep).toBe(5);
     expect(n.anchor.injectDepth).toBe(0);
@@ -200,16 +199,6 @@ describe('计划目标时间相对提示', () => {
     const plans = [{ id: 'p', kind: 'plan', content: '去看展', status: 'open', createdAt: 0, targetTime: '2026/9/20' }] as never;
     expect(fmtPlans(plans)).toContain('目标 2026/9/20)');
     expect(fmtPlans(plans, '2026/9/13')).toContain('目标 2026/9/20,还有 7 天');
-  });
-});
-
-describe('白鸟后端键名', () => {
-  it('safeSegment 只含 [A-Za-z0-9_-],稳定且不同输入不同哈希', () => {
-    const a = safeSegment('艾琳.png|2026-9-13 @ 10h05m.jsonl');
-    expect(a).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(a.length).toBeLessThanOrEqual(128);
-    expect(safeSegment('艾琳.png|2026-9-13 @ 10h05m.jsonl')).toBe(a);
-    expect(safeSegment('其它')).not.toBe(a);
   });
 });
 

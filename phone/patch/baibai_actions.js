@@ -1,3 +1,10 @@
+      case "baibai-preview-memory": {
+        baibaiInvalidate();
+        const brief = baibaiPlanningBrief();
+        assert(brief, "记忆读取未开启或尚未连接，请检查手机设置和柏宝书联动页的读取开关");
+        await ui.confirm("柏宝书记忆参考（只读）", JSON.stringify(brief, null, 2), "知道了");
+        return;
+      }
       case "baibai-enabled":
       case "baibai-brief":
       case "baibai-push":
@@ -18,6 +25,7 @@
       }
       case "baibai-import-memory": {
         assert(ui.data, "先打开一个聊天");
+        assert(baibaiReadEnabled(), "请先开启柏宝书记忆读取");
         const brief = baibaiBrief(null, { maxAge: 0 });
         assert(brief, "未检测到柏宝书，或柏宝书关闭了小手机联动");
         const snapNow = snapshot(ui);
@@ -27,7 +35,7 @@
           ui.notify("柏宝书里没有新的可导入记忆。");
           return;
         }
-        if (!await ui.confirm("导入柏宝书记忆？", `将把 ${fresh.length} 条柏宝书的未了结计划 / 锚点日记 / 分层剧情摘要存为手机记忆（带“柏宝书”标记：不同步进记忆世界书，也不会再注入正文，避免与柏宝书自己的注入重复）。可在“记忆”里逐条停用或删除。`)) return;
+        if (!await ui.confirm("导入柏宝书记忆？", `将把 ${fresh.length} 条柏宝书的未了结计划 / 锚点日记 / 分层剧情摘要存为手机记忆（带“柏宝书”标记：不同步进记忆世界书，也不会再注入正文，避免与柏宝书自己的注入重复）。默认仅玩家知情；可在“记忆”里明确设置其他知情人、停用或删除。`)) return;
         let count = 0;
         await change(ui, (s) => {
           const ids = new Set(s.memories.map((m) => m.id));
