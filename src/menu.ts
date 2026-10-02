@@ -14,9 +14,9 @@ export function injectMenuButton() {
 
     const $item = $(`
       <div class="extension_container interactable" tabindex="0">
-        <a id="${MENU_ITEM_ID}" class="list-group-item" href="#" title="柏宝书">
+        <a id="${MENU_ITEM_ID}" class="list-group-item" href="#" title="柏宝书-月夜来信版">
           <i class="fa-solid fa-book-bookmark"></i>
-          <span>柏宝书</span>
+          <span>柏宝书-月夜来信版</span>
         </a>
       </div>
     `);

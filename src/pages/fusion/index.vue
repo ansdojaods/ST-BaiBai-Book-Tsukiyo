@@ -325,7 +325,7 @@ onMounted(() => {
 
     <!-- ===================== 锚点日记 ===================== -->
     <div v-if="tab === 'anchor'">
-      <p class="bbs-fu-hint">锚点日记是"手动挡"的阶段性全面总结:关系、人物、道具与内部梗、关键细节、里程碑事件、待办伏笔。想存档时点一下即可;每次生成都保留为新版本,可回看、排除、回退。思路参考 AnchorNote,融合版独立实现。</p>
+      <p class="bbs-fu-hint">锚点日记是"手动挡"的阶段性全面总结:关系、人物、道具与内部梗、关键细节、里程碑事件、待办伏笔。想存档时点一下即可;每次生成都保留为新版本,可回看、排除、回退。思路参考 AnchorNote,月夜来信版独立实现。</p>
       <label class="bbs-fu-switch"><span>启用锚点日记</span><input v-model="a.enabled" type="checkbox" class="bbs-fu-check" /></label>
       <div class="bbs-fu-actions">
         <button class="bbs-btn bbs-btn-primary" type="button" :disabled="!a.enabled" @click="triggerNow">生成锚点日记(写入正文)</button>

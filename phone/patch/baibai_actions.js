@@ -11,7 +11,7 @@
       }
       case "baibai-push-now": {
         assert(ui.data, "先打开一个聊天");
-        assert(baibaiApi(), "未检测到柏宝书（需要 ST-BaiBai-Book 融合版 ≥1.3.0，并开启其“小手机联动”）");
+        assert(baibaiApi(), "未检测到柏宝书-月夜来信版（需 ≥1.3.0，并在其「联动」页开启小手机联动）");
         const r = await engine.baibai.push({ force: true });
         ui.notify(r && (r.added || r.updated) ? `已回写柏宝书：新增 ${r.added} 条，更新 ${r.updated} 条。` : "柏宝书里已是最新，没有需要回写的内容。");
         return;

@@ -769,7 +769,7 @@ function exportPublicApiDocument() {
     <div class="bbs-master" :class="{ 'is-off': !apiSettings.enabled }">
       <span class="bbs-master-spine" aria-hidden="true"></span>
       <div class="bbs-master-text">
-        <span class="bbs-master-title">柏宝书 · 记忆引擎</span>
+        <span class="bbs-master-title">柏宝书-月夜来信版 · 记忆引擎</span>
       </div>
       <button
         type="button"
@@ -1821,7 +1821,7 @@ function exportPublicApiDocument() {
             type="text"
             placeholder="留空=「回复 ok」;如:只回答你的模型名"
           />
-          <span class="bbs-field-hint">【融合版】测试渠道时发送这句话;写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。上次结果:{{ editingChannel.lastTest ? `${editingChannel.lastTest.ok ? '成功' : '失败'} · ${new Date(editingChannel.lastTest.at).toLocaleString()}` : '尚未测过' }}</span>
+          <span class="bbs-field-hint">【月夜来信版】测试渠道时发送这句话;写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。上次结果:{{ editingChannel.lastTest ? `${editingChannel.lastTest.ok ? '成功' : '失败'} · ${new Date(editingChannel.lastTest.at).toLocaleString()}` : '尚未测过' }}</span>
         </label>
         <p v-if="testing[editingChannel.id]" class="bbs-channel-test">{{ testing[editingChannel.id] }}</p>
 

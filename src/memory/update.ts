@@ -24,7 +24,7 @@ const CURRENT_VERSION = PLUGIN_VERSION;
  * 发布到自己的仓库后把下面的占位换成 `https://raw.githubusercontent.com/<账号>/<仓库>/main/manifest.json`;
  * 含 '<' 的占位会让检测直接跳过(不报错、不误报)。
  */
-const REMOTE_MANIFEST_URL = 'https://raw.githubusercontent.com/<your-account>/ST-BaiBai-Book-Fusion/main/manifest.json';
+const REMOTE_MANIFEST_URL = 'https://raw.githubusercontent.com/<your-account>/ST-BaiBai-Book-Tsukiyo/main/manifest.json';
 
 /** 对外响应式状态:驱动设置 tab 角标与设置页版本区块。 */
 export const updateState = reactive<{
@@ -86,7 +86,7 @@ async function readRemoteVersion(): Promise<string> {
  * 一次会话只主动查一次;force=true 跳过该限制(供「重新检查」手动触发)。
  */
 export async function checkForUpdate(force = false): Promise<void> {
-  if (REMOTE_MANIFEST_URL.includes('<')) return; // 【融合版】未配置自己的仓库地址 → 不检测
+  if (REMOTE_MANIFEST_URL.includes('<')) return; // 【月夜来信版】未配置自己的仓库地址 → 不检测
   if (updateState.checking) return;
   if (checkedThisSession && !force) return;
   updateState.checking = true;

@@ -1,5 +1,12 @@
 # 更新日志
 
+## 1.3.1 月夜来信版(2026-10-02)
+- 更名:扩展显示名 / 窗口标题 / 扩展菜单 / 顶栏提示 / 设置页标题统一为「柏宝书-月夜来信版」;仓库与文件夹名 `ST-BaiBai-Book-Tsukiyo`;package 名 `st-baibai-book-tsukiyo`。
+- **接口与数据完全不变**:`window.STBaiBaiBook`(含 `.phone`)、事件名、`chatMetadata` 键、设置键、`bbs-` CSS 前缀、隐藏正则 id 都沿用,因此小手机 1.6.0 无需改动即可识别;原版柏宝书的聊天数据可直接被本版读取。
+- 诊断包 `plugin.name` 改为 `ST-BaiBai-Book-Tsukiyo (柏宝书-月夜来信版)`;更新检测占位地址改为 `<your-account>/ST-BaiBai-Book-Tsukiyo`。
+- 小手机 1.6.1:仅提示文案(设置卡片、连接状态、报错)改为「柏宝书-月夜来信版」,逻辑与 1.6.0 相同;新增 `phone/patch/build_json.py` 一键写回角色卡 / 导入版 JSON。
+
+
 ## 1.3.0 融合版(2026-10-02)
 
 ### 新增

@@ -1,6 +1,6 @@
-# 柏宝书 · 融合版(v1.3.0)技术说明
+# 柏宝书-月夜来信版(v1.3.1,原「融合版」)技术说明
 
-> 本文说明融合版在原版 ST-BaiBai-Book v1.2.9 之上**新增了什么、放在哪、怎么关、怎么测**。
+> 本文说明「柏宝书-月夜来信版」(下文沿用开发期的简称「融合版」)在原版 ST-BaiBai-Book v1.2.9 之上**新增了什么、放在哪、怎么关、怎么测**。
 > 原版功能(自动摘要 / 台账 / 向量记忆 / 带数据新建 / 公开 API …)不在此重复,见仓库 `README.md` 与 `PUBLIC_API.md`。
 
 ## 0. 一句话
@@ -35,7 +35,7 @@ src/
   fusion/bind.ts     融合模块统一绑定入口(index.ts 调用)
   fusion/fusion.test.ts  融合功能单元测试(17 条)
   pages/fusion/index.vue 「联动」设置页
-phone/               月夜来信小手机 1.6.0 补丁与产物(见 phone/README.md)
+phone/               月夜来信小手机 1.6.1 补丁与产物(见 phone/README.md)
 docs/                本文、PHONE_BRIDGE.md
 ```
 
