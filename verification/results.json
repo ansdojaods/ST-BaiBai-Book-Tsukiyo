@@ -1,28 +1,38 @@
 {
-  "baseCommit": "9e42ccd68c0cc0ea7166d5b2f31553005ab61fe6",
-  "date": "2026-10-02",
-  "mainVersion": "1.3.3",
-  "phoneVersion": "1.6.2",
-  "deployment": "local delivery only; not pushed to GitHub or user server",
-  "tests": {
-    "vitest": 251,
-    "phoneMemoryCases": 24,
-    "extraAssertions": [
-      810,
-      12,
-      53
-    ],
-    "typecheck": "passed",
-    "localOnlyArtifactCheck": "passed",
-    "simulatedUI": "passed",
-    "realSTEndToEnd": "not performed"
+  "mainVersion": "1.3.4",
+  "phoneVersion": "1.6.3",
+  "baseDelivery": "1.3.3 / 1.6.2",
+  "upstreamCommit": "9e42ccd68c0cc0ea7166d5b2f31553005ab61fe6",
+  "verifiedAtUTC": "2026-10-02T06:17:49.676555+00:00",
+  "commands": {
+    "npm ci": "PASS (114 audited, 0 vulnerabilities reported)",
+    "npm run typecheck": "PASS",
+    "npm test": "PASS",
+    "npm run build": "PASS (large chunk warning remains)",
+    "npm run check:local": "PASS",
+    "npm run build:phone": "PASS",
+    "npm run test:phone-ui": "PASS",
+    "node --check (main and phone)": "PASS",
+    "phone rebuild byte equality": "PASS",
+    "phone JSON content equality and stable ID": "PASS"
   },
+  "counts": {
+    "vitestFiles": 12,
+    "vitestTests": 298,
+    "newSafetyTests": 47,
+    "timeRelAssertions": 810,
+    "vectorDepthAssertions": 12,
+    "memoryRegressionAssertions": 53,
+    "phoneGenerationAndSyncCases": 32
+  },
+  "scope": "Local source-level and actual-bundle tests with mocked ST/LLM; no real ST, network E2E, user deployment or GitHub push.",
+  "compatibility": "v2 identity snapshots only for full restore; legacy v1 and conflicting chat/message identity rejected before memory mutation; legacy points individually exportable.",
   "sha256": {
-    "manifest.json": "494ddaed3c61f89764e3d03008b3ded6d7a8e5349e0c0d62ca9e7414a4a14b9f",
-    "dist/index.js": "7eaeec4259865e49c5a1401572eae497d7061e98df4e0ab5de1b5f3519fe564e",
-    "dist/index.css": "d68e4d35a3a38361636a48541924e489fbf320e17ac515bfa2c860cc50fc066a",
-    "dist/index.js.map": "7965f77622fc30d2e3990bfe67ace0602f08dfbcc272c004ebc51eb900639981",
-    "phone/tsukiyo-phone-1.6.2.js": "1c7b050ef36793c42eb2516bfa336321a9e7fefc1174be6abbaf209759083001",
-    "phone/dist/月夜来信小手机_酒馆助手导入版_v1.6.2_柏宝书联动.json": "ab2c879612e4e657dae6cda76550b277b93f72662e75419f9bb832106badef96"
+    "dist/index.js": "35ed50cb4f543276ec8b126f18484c1676aec89b688fa3dc524aa2f83fbafacd",
+    "dist/index.css": "ae816c1bdad58c33cfc312aef3f715f8c068a5a84c759dfc85efec54bdebdb8a",
+    "dist/index.js.map": "a43dd6a3f236a618bfab026da87a4dffd77526b0695a37600e844438f4616efd",
+    "manifest.json": "639f7282649c879ccb79e2ecb7a788d57991b96d4ed72969fb92e8333d80b9cc",
+    "phone/tsukiyo-phone-1.6.3.js": "4026cdcf5c308d523134179bb613fb75877668f40a541ca025fc61f879c11f40",
+    "phone/dist/月夜来信小手机_酒馆助手导入版_v1.6.3_柏宝书联动.json": "93422667ed7699e80e906c61bff95729cf799434644822e5f079b90b73a365f5"
   }
 }

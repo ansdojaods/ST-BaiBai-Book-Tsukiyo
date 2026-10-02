@@ -1,3 +1,4 @@
+import { captureSession, sessionCurrent, type SessionTicket } from '@/st/session';
 /** 手写补摘：仅处理现有未摘要 AI 楼，不调用任何生成/向量 API。 */
 import { getContext, type STMessage } from '@/st/context';
 import { getLeaf, invalidateSummaryAncestors, makeLeafId } from './apply';
@@ -10,6 +11,7 @@ import { createRestorePoint } from '@/backend/restore';
 import type { LeafExtra } from './types';
 
 export interface ManualFloorTicket {
+  session: SessionTicket;
   chatId: string;
   chat: STMessage[];
   message: STMessage;
@@ -31,7 +33,7 @@ export function beginManualFloorSummary(floor: number): ManualFloorTicket {
     throw new Error('该楼层不是待摘要的 AI 消息；已有摘要请使用编辑入口');
   }
   const message = ctx.chat[floor];
-  return { chatId, chat: ctx.chat, message, floor, body: message.mes, swipe: swipeOf(message), oldLeaf: getLeaf(message) };
+  return { session: captureSession(), chatId, chat: ctx.chat, message, floor, body: message.mes, swipe: swipeOf(message), oldLeaf: getLeaf(message) };
 }
 export function addManualFloorSummary(ticket: ManualFloorTicket, text: string, timeStart = '', timeEnd = ''): LeafExtra {
   assertIdle();
@@ -40,7 +42,7 @@ export function addManualFloorSummary(ticket: ManualFloorTicket, text: string, t
   if (body.length > 60000) throw new Error('单条手写摘要请控制在60000字符以内');
   if (timeStart.length > 200 || timeEnd.length > 200) throw new Error('时间字段过长');
   const ctx = getContext();
-  if (!ctx || ctx.getCurrentChatId?.() !== ticket.chatId || ctx.chat !== ticket.chat) throw new Error('聊天已切换，请重新选择楼层');
+  if (!sessionCurrent(ticket.session) || !ctx || ctx.getCurrentChatId?.() !== ticket.chatId || ctx.chat !== ticket.chat) throw new Error('聊天已切换，请重新选择楼层');
   const m = ctx.chat[ticket.floor];
   if (m !== ticket.message || m.mes !== ticket.body || swipeOf(m) !== ticket.swipe) throw new Error('楼层或正文/swipe已变化，请关闭并重新选择楼层');
   if (getLeaf(m) !== ticket.oldLeaf || !pendingAiFloors(ctx.chat).includes(ticket.floor)) throw new Error('该楼层的摘要已变化，不会覆盖，请重新打开');

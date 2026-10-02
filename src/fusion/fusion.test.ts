@@ -224,12 +224,12 @@ describe('回收站与恢复点', () => {
     expect(trashState.items[0].title).toBe('t7');
   });
 
-  it('恢复点:保存→改动→回滚,叶子按楼层回写,空状态不建点', () => {
+  it('恢复点:保存→改动→回滚,叶子经消息身份校验回写,空状态不建点', () => {
     const chat = [msg('开场'), msg('第一回合')];
     setup(chat);
     loadRestorePoints();
     expect(createRestorePoint('空')).toBeNull();
-    chat[1].extra!.bbs_leaf = { id: 'leaf1', text: '叶子摘要', createdAt: 1 } as never;
+    chat[1].extra!.bbs_leaf = { id: 'leaf1', text: '叶子摘要', createdAt: 1, delta: {}, swipe: 0, v: 1 };
     memory.summaries.push({ id: 's1', text: '总结', level: 1, createdAt: 1, auto: true, childIds: ['leaf1'] });
     addAnchor('锚点v1', 1, 'manual');
     recomputeDerived();

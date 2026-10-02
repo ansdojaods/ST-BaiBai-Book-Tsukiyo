@@ -124,7 +124,7 @@ export function pushExternalNotes(source: string, notes: ExternalNoteInput[], op
   // 限量:同源超出时淘汰最旧非置顶
   const mine = externalState.notes.filter(n => n.source === src);
   if (mine.length > MAX_PER_SOURCE) {
-    const removable = mine.filter(n => !n.pinned).sort((a, b) => a.ts - b.ts);
+    const removable = [...mine].sort((a, b) => Number(!!a.pinned) - Number(!!b.pinned) || a.ts - b.ts);
     const drop = new Set(removable.slice(0, mine.length - MAX_PER_SOURCE).map(n => n.id));
     externalState.notes = externalState.notes.filter(n => !(n.source === src && drop.has(n.id)));
   }
@@ -142,8 +142,9 @@ export function pushExternalNotes(source: string, notes: ExternalNoteInput[], op
   return { added, updated, total: externalState.notes.length };
 }
 
-export function removeExternalNote(id: string): ExternalNote | null {
-  const idx = externalState.notes.findIndex(n => n.id === id);
+export function removeExternalNote(id: string, source?: string): ExternalNote | null {
+  if (source === undefined && externalState.notes.filter(n => n.id === id).length !== 1) return null;
+  const idx = externalState.notes.findIndex(n => n.id === id && (source === undefined || n.source === source));
   if (idx < 0) return null;
   const [removed] = externalState.notes.splice(idx, 1);
   saveExternal();
@@ -157,8 +158,9 @@ export function clearExternal(source?: string): number {
   return before - externalState.notes.length;
 }
 
-export function setExternalPinned(id: string, pinned: boolean): void {
-  const n = externalState.notes.find(x => x.id === id);
+export function setExternalPinned(id: string, pinned: boolean, source?: string): void {
+  if (source === undefined && externalState.notes.filter(n => n.id === id).length !== 1) return;
+  const n = externalState.notes.find(x => x.id === id && (source === undefined || x.source === source));
   if (!n) return;
   n.pinned = pinned || undefined;
   saveExternal();
@@ -198,6 +200,8 @@ function fmtNote(n: ExternalNote): string {
 
 /** 按预算挑选:置顶优先,其余按时间倒序(最新优先),输出时再按时间正序 */
 export function selectExternalNotes(maxChars: number, filter?: (n: ExternalNote) => boolean): ExternalNote[] {
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return [];
+  maxChars = Math.floor(maxChars);
   const pool = filter ? externalState.notes.filter(filter) : externalState.notes.slice();
   const pinned = pool.filter(n => n.pinned).sort((a, b) => b.ts - a.ts);
   const rest = pool.filter(n => !n.pinned).sort((a, b) => b.ts - a.ts);
@@ -205,7 +209,7 @@ export function selectExternalNotes(maxChars: number, filter?: (n: ExternalNote)
   let used = 0;
   for (const n of [...pinned, ...rest]) {
     const len = fmtNote(n).length + 1;
-    if (used + len > maxChars && chosen.length) break;
+    if (used + len > maxChars) continue;
     chosen.push(n);
     used += len;
   }
@@ -216,7 +220,8 @@ export function selectExternalNotes(maxChars: number, filter?: (n: ExternalNote)
 export function buildExternalInjectionText(): string {
   const s = apiSettings.phoneBridge;
   if (!s?.enabled || !s.injectExternal) return '';
-  const chosen = selectExternalNotes(s.externalMaxChars);
+  const budget = Math.max(0, Math.floor(s.externalMaxChars));
+  const chosen = selectExternalNotes(Math.max(0, budget - 150));
   if (!chosen.length) return '';
   const groups = new Map<string, ExternalNote[]>();
   for (const n of chosen) {
@@ -227,7 +232,7 @@ export function buildExternalInjectionText(): string {
   const body = [...groups.entries()]
     .map(([src, list]) => `【${SOURCE_LABEL[src] ?? src}】\n${list.map(fmtNote).join('\n')}`)
     .join('\n');
-  return `[正文之外的记录]\n以下事情发生在正文之外(例如手机聊天、约定与动态),角色知道这些事,请在合适时自然体现,不要原样复述、不要提及这份清单:\n${body}\n[正文之外的记录结束]`;
+  return `[正文之外的记录]\n以下事情发生在正文之外(例如手机聊天、约定与动态),角色知道这些事,请在合适时自然体现,不要原样复述、不要提及这份清单:\n${body}\n[正文之外的记录结束]`.slice(0, budget);
 }
 
 /**
@@ -237,10 +242,10 @@ export function buildExternalInjectionText(): string {
 export function buildExternalSummaryMaterial(fromFloor: number, toFloor: number, maxChars = 1500): string {
   const s = apiSettings.phoneBridge;
   if (!s?.enabled || !s.includeInSummary) return '';
-  const chosen = selectExternalNotes(maxChars, n => {
+  const chosen = selectExternalNotes(Math.max(0, maxChars - 65), n => {
     if (typeof n.floor === 'number') return n.floor > fromFloor && n.floor <= toFloor;
     return true;
   });
   if (!chosen.length) return '';
-  return `[外部记录(手机等渠道,发生在正文之外,但属于同一故事;可作为摘要/状态更新的依据)]\n${chosen.map(fmtNote).join('\n')}`;
+  return `[外部记录(手机等渠道,发生在正文之外,但属于同一故事;可作为摘要/状态更新的依据)]\n${chosen.map(fmtNote).join('\n')}`.slice(0, Math.max(0, maxChars));
 }

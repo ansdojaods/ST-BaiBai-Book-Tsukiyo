@@ -1620,7 +1620,7 @@ function exportPublicApiDocument() {
           新对话可向量召回它的内容(逐次累加,分支也自动继承)。
         </p>
         <div v-if="carryPlan" class="bbs-field-hint">
-          将携带:AI {{ carryPlan.aiCount }} 条 / 实际消息 {{ carryPlan.carryCount }} 条;旧剧情摘要 {{ carryPlan.recapLen > 0 ? '有' : '无' }}。
+          将携带:AI {{ carryPlan.aiCount }} 条 / 实际消息 {{ carryPlan.carryCount }} 条;旧剧情摘要 {{ carryPlan.recapLen > 0 ? '有' : '无' }}；锚点 {{ carryPlan.anchorCount }} 版、外部记录 {{ carryPlan.externalCount }} 条，以及聊天层变量模板。恢复点和回收站留在旧聊天。
         </div>
         <button
           class="bbs-btn bbs-btn-sm bbs-btn-primary"

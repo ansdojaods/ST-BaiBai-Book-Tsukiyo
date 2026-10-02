@@ -146,9 +146,15 @@ function makePoint() {
 }
 function doRestorePoint(id: string) {
   ask('回滚到恢复点', '将用该恢复点整份覆盖当前记忆。回滚前会自动再保存一个恢复点。继续?', () => {
+    try {
     const r = restoreFromPoint(id);
     toast(r.ok ? `已回滚${r.skippedLeaves ? `(${r.skippedLeaves} 条叶子因楼层不存在跳过)` : ''}` : '恢复点不存在', r.ok ? 'success' : 'error');
+    } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
   });
+}
+function exportRestorePoint(id: string) {
+  const p = restoreState.points.find(x => x.id === id);
+  if (p) downloadJson(`柏宝书恢复点_${p.id}.json`, p.snapshot);
 }
 function exportFile() {
   const s = buildSnapshot();
@@ -169,13 +175,15 @@ function doImport() {
   }
   const snap = parseSnapshot(parsed);
   if (!snap) {
-    toast('不是柏宝书记忆快照文件', 'error');
+    toast('快照损坏或版本不支持：仅接受本版 v2 身份快照；旧文件不会覆盖当前记忆', 'error');
     return;
   }
   importOpen.value = false;
   ask('导入快照', `将用文件中的快照(${snap.charName || '未知角色'},${snap.summaries.length} 个总结节点、${snap.leaves.length} 条叶子)整份覆盖当前记忆。导入前会自动保存恢复点。继续?`, () => {
+    try {
     const r = applySnapshot(snap);
     toast(`已导入${r.skippedLeaves ? `(${r.skippedLeaves} 条叶子因楼层不存在跳过)` : ''}`, 'success');
+    } catch (e) { toast(e instanceof Error ? e.message : String(e), 'error'); }
   });
 }
 function restoreTrash(id: string) {
@@ -224,8 +232,8 @@ async function testOne(id: string) {
 async function testAll() {
   for (const c of channels.value) await testOne(c.id);
 }
-function delNote(id: string) {
-  const n = removeExternalNote(id);
+function delNote(id: string, source: string) {
+  const n = removeExternalNote(id, source);
   if (n) {
     trashPush({ kind: 'external', title: `外部记录:${(n.title || n.text).slice(0, 40)}`, payload: n });
     refreshInjection();
@@ -339,6 +347,7 @@ const phoneDetected = computed(() => {
       <div v-for="pt in restoreState.points" :key="pt.id" class="bbs-fu-row">
         <div class="bbs-fu-row-main">
           <strong>{{ pt.reason }}</strong>
+          <button class="bbs-fu-act" type="button" @click="exportRestorePoint(pt.id)">导出此点（v{{ pt.snapshot.snapshotVersion }}）</button>
           <div class="bbs-fu-row-sub">{{ fmtTime(pt.createdAt) }} · {{ pt.snapshot.floors }} 楼 · {{ pt.snapshot.summaries.length }} 个总结节点 · {{ pt.snapshot.leaves.length }} 条叶子 · {{ pt.snapshot.anchors.length }} 版锚点</div>
         </div>
         <div class="bbs-fu-card-acts">
@@ -407,7 +416,7 @@ const phoneDetected = computed(() => {
       </div>
       <p v-if="externalState.lastPushAt" class="bbs-fu-note">最近一次推送:{{ fmtTime(externalState.lastPushAt) }}(来源 {{ externalState.lastSource }})</p>
       <div v-if="!extNotesDesc.length" class="bbs-empty">还没有外部记录。小手机 1.6 联动版会在手机聊天/约定变化后自动推送。</div>
-      <div v-for="n in extNotesDesc" :key="n.source + n.id" class="bbs-fu-row">
+      <div v-for="n in extNotesDesc" :key="JSON.stringify([n.source, n.id])" class="bbs-fu-row">
         <div class="bbs-fu-row-main">
           <span class="bbs-fu-badge">{{ EXT_KIND[n.kind] ?? n.kind }}</span>
           <span v-if="n.pinned" class="bbs-fu-badge bbs-fu-badge-on">置顶</span>
@@ -416,8 +425,8 @@ const phoneDetected = computed(() => {
           <div class="bbs-fu-row-sub">{{ n.source }}{{ n.time ? ` · ${n.time}` : '' }}{{ typeof n.floor === 'number' ? ` · #${n.floor}` : '' }} · {{ fmtTime(n.ts) }}</div>
         </div>
         <div class="bbs-fu-card-acts">
-          <button class="bbs-fu-act" type="button" :title="n.pinned ? '取消置顶' : '置顶'" @click="setExternalPinned(n.id, !n.pinned); refreshInjection()"><Icon name="pin" /></button>
-          <button class="bbs-fu-act bbs-fu-act-del" type="button" title="移入回收站" @click="delNote(n.id)"><Icon name="trash" /></button>
+          <button class="bbs-fu-act" type="button" :title="n.pinned ? '取消置顶' : '置顶'" @click="setExternalPinned(n.id, !n.pinned, n.source); refreshInjection()"><Icon name="pin" /></button>
+          <button class="bbs-fu-act bbs-fu-act-del" type="button" title="移入回收站" @click="delNote(n.id, n.source)"><Icon name="trash" /></button>
         </div>
       </div>
 
@@ -485,7 +494,7 @@ const phoneDetected = computed(() => {
       <div v-if="importOpen" class="bbs-modal bbs-fu-modal-wide" role="dialog" aria-modal="true" aria-label="导入快照">
         <header class="bbs-modal-head"><span class="bbs-modal-title">从文件导入记忆快照</span><button class="bbs-fu-act" type="button" title="关闭" @click="importOpen = false"><Icon name="close" /></button></header>
         <p class="bbs-fu-hint">粘贴「导出为文件」得到的 JSON 内容。</p>
-        <label class="bbs-modal-field"><textarea v-model="importText" class="bbs-input bbs-fu-ta" rows="12" placeholder='{"snapshotVersion":1,...}' /></label>
+        <label class="bbs-modal-field"><textarea v-model="importText" class="bbs-input bbs-fu-ta" rows="12" placeholder='{"snapshotVersion":2,...}' /></label>
         <footer class="bbs-modal-foot"><button class="bbs-btn" type="button" @click="importOpen = false">取消</button><button class="bbs-btn bbs-btn-primary" type="button" @click="doImport">导入</button></footer>
       </div>
     </ModalMask>

@@ -1,3 +1,4 @@
+import { identifyMessage, type MessageIdentity } from '@/st/session';
 import { apiSettings } from '@/api/settings';
 import { getContext, setMessageText, type STMessage } from '@/st/context';
 import { fmtItemLogInline } from './prompts';
@@ -1438,10 +1439,11 @@ function applyStoredDeltaTo(mem: BaibaiMemory, d: StoredDelta, leaf: { id: strin
 export function deriveMemory(
   chat: STMessage[] | null,
   upToExclusive?: number,
+  templates = memory.varTemplates,
 ): Pick<BaibaiMemory, 'state' | 'protagonist' | 'items' | 'plans' | 'scenes' | 'npcs' | 'itemLog' | 'lifeDetails' | 'vars'> {
   const mem = createEmptyMemory();
   // 变量从三层合并模板起算(无 chat 也返回初始状态);seed 时展开模板里的 ST 宏({{user}} 等)
-  mem.vars = expandVarMacros(mergeTemplates(memory.varTemplates));
+  mem.vars = expandVarMacros(mergeTemplates(templates));
   if (!chat) return { state: mem.state, protagonist: mem.protagonist, items: mem.items, plans: mem.plans, scenes: mem.scenes, npcs: mem.npcs, itemLog: mem.itemLog, lifeDetails: mem.lifeDetails, vars: mem.vars };
   const end = typeof upToExclusive === 'number' ? Math.min(upToExclusive, chat.length) : chat.length;
   for (let i = 0; i < end; i++) {
@@ -2120,6 +2122,19 @@ export function removeScene(path: string[]): boolean {
   return appendOpToLatestLeaf({ scenes: { ops: [{ op: 'remove', path: clean }] } });
 }
 
+/** 删除叶子/子树会剪去祖先，恢复载荷必须同时保存这些节点，而非只存叶子。 */
+function ancestorSnapshots(children: ReadonlySet<string>): MemSummary[] {
+  const ids = new Set(children), found: MemSummary[] = [];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of memory.summaries) {
+      if (!ids.has(node.id) && node.childIds.some(id => ids.has(id))) { ids.add(node.id); found.push(node); changed = true; }
+    }
+  }
+  return JSON.parse(JSON.stringify(found));
+}
+
 /** 删除某条消息上的叶子(清 extra),然后级联删坏链 + 重算 + 落盘 */
 export function deleteLeafAt(index: number): boolean {
   const chat = getContext()?.chat;
@@ -2127,7 +2142,7 @@ export function deleteLeafAt(index: number): boolean {
   // 【融合版】先进回收站再删
   try {
     const leaf = chat[index].extra!.bbs_leaf!;
-    trashPush({ kind: 'leaf', title: `#${index} 叶子摘要:${String(leaf.text ?? '').slice(0, 40)}`, payload: { msgIndex: index, leaf: JSON.parse(JSON.stringify(leaf)) } });
+    trashPush({ kind: 'leaf', title: `#${index} 叶子摘要:${String(leaf.text ?? '').slice(0, 40)}`, payload: { msgIndex: index, identity: identifyMessage(chat[index]), leaf: JSON.parse(JSON.stringify(leaf)), summaries: ancestorSnapshots(new Set([leaf.id])) } });
   } catch (e) {
     console.warn('[柏宝书] 回收站写入失败', e);
   }
@@ -2285,7 +2300,7 @@ export function deleteSummary(id: string): boolean {
   // 【融合版】先进回收站再删
   try {
     const node = memory.summaries[idx];
-    trashPush({ kind: 'summary', title: `总结L${node.level}:${node.text.slice(0, 40)}`, payload: JSON.parse(JSON.stringify(node)) });
+    trashPush({ kind: 'summary', title: `总结L${node.level}:${node.text.slice(0, 40)}`, payload: { node: JSON.parse(JSON.stringify(node)), parents: memory.summaries.filter(p => p.childIds.includes(id)).map(p => ({ id: p.id, index: p.childIds.indexOf(id), expected: p.childIds.filter(c => c !== id) })) } });
   } catch (e) {
     console.warn('[柏宝书] 回收站写入失败', e);
   }
@@ -2341,16 +2356,17 @@ export function deleteSummarySubtrees(rootIds: string[]): DeleteSummarySubtreesR
     for (const childId of summary.childIds) collect(childId);
   };
   for (const id of roots) collect(id);
+  for (const node of ancestorSnapshots(new Set([...summaryIds, ...leafIds]))) summaryIds.add(node.id);
 
   const chat = getContext()?.chat;
   let leaves = 0;
   // 【融合版】整棵子树(总结节点 + 叶子)打包进回收站,恢复时一次放回
-  const trashLeaves: Array<{ msgIndex: number; leaf: LeafExtra }> = [];
+  const trashLeaves: Array<{ msgIndex: number; leaf: LeafExtra; identity: MessageIdentity }> = [];
   if (chat && leafIds.size) {
     chat.forEach((message, i) => {
       const leaf = getLeaf(message);
       if (!leaf || !leafIds.has(leaf.id)) return;
-      trashLeaves.push({ msgIndex: i, leaf: JSON.parse(JSON.stringify(leaf)) });
+      trashLeaves.push({ msgIndex: i, identity: identifyMessage(message), leaf: JSON.parse(JSON.stringify(leaf)) });
       delete (message.extra as Record<string, unknown>).bbs_leaf;
       leaves++;
     });

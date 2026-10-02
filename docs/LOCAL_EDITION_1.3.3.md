@@ -1,3 +1,5 @@
+> 历史版本说明，不是本次安装指南。当前版本请看 [README](../README.md)。
+
 # 百宝月夜书 1.3.3 · 本地改版使用说明
 
 这是基于仓库提交 `9e42ccd68c0cc0ea7166d5b2f31553005ab61fe6` 制作的本地修改包，配套手机为1.6.2。已推送到你的GitHub（ansdojaods/ST-BaiBai-Book-Tsukiyo），不是上游官方发布。

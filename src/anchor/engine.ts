@@ -1,3 +1,4 @@
+import { captureSession, sessionCurrent, captureInput } from '@/st/session';
 /**
  * 锚点日记:引擎(融合版新增)。
  *
@@ -11,7 +12,7 @@
  */
 import { watch } from 'vue';
 import { getContext, appendChatInput, type STMessage } from '@/st/context';
-import { apiSettings, getChannelForTask } from '@/api/settings';
+import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
 import { requestCompletion, requestViaMainApi, mainApiAvailable, type ChatMsg } from '@/api/client';
 import { memory, scheduleLeafFlush } from '@/memory/store';
 import { selectInjectionNodes, renderHistoryNodesWithRelative, refreshInjection } from '@/memory/inject';
@@ -21,6 +22,7 @@ import { ensureHideRegex, removeHideRegexById } from '@/st/hideRegex';
 import { trashPush } from '@/backend/trash';
 import {
   anchorState,
+  anchorSourceCurrent,
   addAnchor,
   currentAnchor,
   loadAnchors,
@@ -67,16 +69,17 @@ function hash(s: string): string {
 
 /** 扫描某楼层正文,发现新的锚点块就入库(同一消息同一内容只入一次) */
 export function harvestAnchorAt(index: number): AnchorEntry | null {
-  if (!apiSettings.anchor.enabled) return null;
+  if (!engineActiveHere() || !apiSettings.anchor.enabled) return null;
   const chat = getContext()?.chat;
   const msg = chat?.[index];
   if (!msg || msg.is_user) return null;
   const block = extractAnchorBlock(String(msg.mes ?? ''));
-  if (!block) return null;
+  if (!block) { refreshInjection(); return null; }
   const h = hash(block);
   const extra = (msg.extra ??= {}) as Record<string, unknown>;
   const prev = extra[EXTRA_KEY] as { hash?: string; id?: string } | undefined;
-  if (prev?.hash === h && anchorState.anchors.some(a => a.id === prev.id)) return null;
+  const existing = anchorState.anchors.find(a => a.source === 'chat' && (a.id === prev?.id || a.origin?.messageId === extra.bbs_message_id) && anchorSourceCurrent(a) && (a.origin?.block ?? a.text) === block);
+  if (existing) { extra[EXTRA_KEY] = { hash: h, id: existing.id }; refreshInjection(); return null; }
   const entry = addAnchor(block, index, 'chat');
   extra[EXTRA_KEY] = { hash: h, id: entry.id };
   // 去重标记写在消息 extra 上,复用柏宝书的 saveChat 节流链路落盘;锚点本体已在 metadata
@@ -105,7 +108,7 @@ export function handleAnchorIntercept(): void {
   if (!ctx?.setExtensionPrompt) return;
   const s = apiSettings.anchor;
   let text = '';
-  if (s.enabled) {
+  if (engineActiveHere() && s.enabled) {
     if (!s.onDemand) text = effectiveInstruction();
     else {
       const trigger = s.triggerPhrase.trim();
@@ -126,7 +129,7 @@ export function insertTriggerIntoInput(): boolean {
 /** 同步显示隐藏正则(开→注册/更新,关→移除) */
 export function syncAnchorHideRegex(): void {
   const s = apiSettings.anchor;
-  if (s.enabled && s.hideTagInChat) {
+  if (engineActiveHere() && s.enabled && s.hideTagInChat) {
     ensureHideRegex({
       id: HIDE_ANCHOR_SCRIPT_ID,
       scriptName: '柏宝书 · 隐藏锚点日记块',
@@ -173,13 +176,18 @@ function recentFloorsText(chat: STMessage[], aiFloors: number, maxChars: number)
  * 成功后入库为 source='api' 的新版本并刷新注入;失败写 anchorState.lastError。
  */
 export async function generateAnchorSilently(opts: { recentAiFloors?: number } = {}): Promise<AnchorEntry | null> {
-  if (anchorState.busy) return null;
+  if (!engineActiveHere() || !apiSettings.anchor.enabled || anchorState.busy) return null;
   const ctx = getContext();
   const chat = ctx?.chat;
   if (!ctx || !chat?.length) {
     anchorState.lastError = '当前没有打开的聊天';
     return null;
   }
+  const session = captureSession();
+  const verifyInput = captureInput(chat);
+  const forestBefore = JSON.stringify(memory.summaries);
+  const anchorsBefore = JSON.stringify(anchorState.anchors);
+  const task = ++anchorTask;
   anchorState.busy = true;
   anchorState.lastError = '';
   try {
@@ -209,19 +217,22 @@ export async function generateAnchorSilently(opts: { recentAiFloors?: number } =
       },
     ];
     const raw = await send(messages);
+    verifyInput();
+    if (!engineActiveHere() || !apiSettings.anchor.enabled || JSON.stringify(memory.summaries) !== forestBefore || JSON.stringify(anchorState.anchors) !== anchorsBefore) throw new Error('锚点输入或开关已变化，请重新生成');
     const block = extractAnchorBlock(raw) || raw.trim();
     if (!block) throw new Error('模型没有返回锚点内容');
     const entry = addAnchor(block, lastAi >= 0 ? lastAi : chat.length - 1, 'api');
     refreshInjection();
     return entry;
   } catch (e) {
-    anchorState.lastError = e instanceof Error ? e.message : String(e);
+    if (sessionCurrent(session) && task === anchorTask) anchorState.lastError = e instanceof Error ? e.message : String(e);
     return null;
   } finally {
-    anchorState.busy = false;
+    if (task === anchorTask) anchorState.busy = false;
   }
 }
 
+let anchorTask = 0;
 let bound = false;
 /** 启动时绑定:聊天切换重载、消息事件收割、设置变化同步正则与注入 */
 export function bindAnchor(): void {
@@ -234,7 +245,12 @@ export function bindAnchor(): void {
     const es = ctx.eventSource;
     const et = ctx.eventTypes;
     es.on(et.CHAT_CHANGED, () => {
+      anchorTask++;
+      anchorState.busy = false;
       loadAnchors();
+      handleAnchorIntercept();
+      syncAnchorHideRegex();
+      handleAnchorIntercept();
       refreshInjection();
     });
     const onFloor = (idx: unknown) => {
@@ -244,11 +260,13 @@ export function bindAnchor(): void {
     es.on(et.MESSAGE_RECEIVED, onFloor);
     es.on(et.MESSAGE_EDITED, onFloor);
     es.on(et.MESSAGE_SWIPED, onFloor);
+    if (et.MESSAGE_DELETED) es.on(et.MESSAGE_DELETED, () => refreshInjection());
   }
   watch(
-    () => [apiSettings.anchor.enabled, apiSettings.anchor.hideTagInChat] as const,
+    () => [apiSettings.enabled, apiSettings.excludedChars, apiSettings.anchor.enabled, apiSettings.anchor.hideTagInChat] as const,
     () => {
       syncAnchorHideRegex();
+      handleAnchorIntercept();
       refreshInjection();
     },
   );

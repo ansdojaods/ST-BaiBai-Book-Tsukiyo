@@ -347,7 +347,7 @@ export function importPhoneProfile(profileId: string, makeChannel: () => ApiChan
   channel.url = url;
   channel.model = model;
   if (key) channel.key = key;
-  if (typeof p.temperature === 'number') channel.temperature = p.temperature;
-  if (typeof p.maxTokens === 'number' && p.maxTokens > 0) channel.maxTokens = Math.max(channel.maxTokens, p.maxTokens);
+  if (typeof p.temperature === 'number' && Number.isFinite(p.temperature)) channel.temperature = p.temperature;
+  if (typeof p.maxTokens === 'number' && Number.isFinite(p.maxTokens) && p.maxTokens > 0) channel.maxTokens = Math.min(262144, Math.max(1, Math.floor(p.maxTokens)));
   return { channel, created };
 }

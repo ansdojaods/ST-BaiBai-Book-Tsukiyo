@@ -1,3 +1,6 @@
+import { captureSession, sessionCurrent, captureInput, assertSession } from '@/st/session';
+import { anchorState, anchorsSnapshot, replaceAnchors, anchorSourceCurrent } from '@/anchor/store';
+import { externalState, externalSnapshot, replaceExternal } from '@/bridge/external';
 /**
  * 带数据创建新对话(Carryover)。
  *
@@ -31,6 +34,8 @@ export interface CarryoverPlan {
   carryStart: number;
   /** 实际要搬的消息条数(窗口内非系统楼) */
   carryCount: number;
+  anchorCount: number;
+  externalCount: number;
   /** 其中 AI 楼条数 */
   aiCount: number;
   /** 合并历史摘要字符数(0 = 无历史可摘) */
@@ -227,6 +232,8 @@ export function computeCarryoverPlan(): CarryoverPlan {
   return {
     carryStart,
     carryCount,
+    anchorCount: anchorState.anchors.length,
+    externalCount: externalState.notes.length,
     aiCount,
     recapLen: recap.length,
     hasData: chat.length > 0 && (carryCount > 0 || recap.length > 0 || deltaHasData(seedDelta)),
@@ -253,7 +260,16 @@ export async function createNewChatWithCarryover(): Promise<boolean> {
     return false;
   }
 
+  const sourceSession = captureSession();
+  const verifySource = captureInput(sourceChat);
+  const sourceForest = JSON.stringify(memory.summaries);
+  const sourceAnchors = anchorsSnapshot().map(a => ({ ...a, excluded: a.excluded || !anchorSourceCurrent(a) }));
+  const sourceExternal = externalSnapshot();
+  const sourceTemplate = JSON.parse(JSON.stringify(memory.varTemplates.chat));
+  const fusionBefore = JSON.stringify([anchorState.anchors, externalState.notes, memory.varTemplates.chat]);
+  const verify = () => { verifySource(); if (JSON.stringify(memory.summaries) !== sourceForest || JSON.stringify([anchorState.anchors, externalState.notes, memory.varTemplates.chat]) !== fusionBefore) throw new Error('源记忆已变化，请重新创建'); };
   const doNewChat = await getDoNewChat();
+  try { verify(); } catch (e) { toast(String(e), 'warning'); return false; }
   if (!doNewChat) {
     toast('无法创建新对话(ST 接口不可用)', 'error');
     return false;
@@ -279,10 +295,12 @@ export async function createNewChatWithCarryover(): Promise<boolean> {
 
   // 搬运的窗口楼层(深拷贝、取消隐藏、保留叶子)
   const carryMessages: STMessage[] = [];
+  const floorMap = new Map<number, number>();
   for (let i = carryStart; i < sourceChat.length; i++) {
     const m = sourceChat[i];
     if (!m) continue;
     if (m.is_system && m.extra?.type) continue; // 原生系统楼不搬
+    floorMap.set(i, carryMessages.length + 1);
     carryMessages.push(sanitizeCarryMessage(m, detailIds));
   }
 
@@ -297,6 +315,7 @@ export async function createNewChatWithCarryover(): Promise<boolean> {
   if (apiSettings.vector.enabled && vecDb && sourceChatId) {
     try {
       if (await isBaiBaoKuAvailable()) {
+        verify();
         const { hash } = await vecBundleCreate(vecDb, sourceChatId);
         newBundleHash = hash;
       }
@@ -307,7 +326,9 @@ export async function createNewChatWithCarryover(): Promise<boolean> {
 
   // ===== 3. 建新对话并切入 =====
   try {
+    verify();
     await ctx.saveChat();
+    verify();
     await doNewChat({ deleteCurrentChat: false });
   } catch (e) {
     toast(`创建新对话失败:${e instanceof Error ? e.message : String(e)}`, 'error');
@@ -319,6 +340,10 @@ export async function createNewChatWithCarryover(): Promise<boolean> {
     const targetCtx = getContext();
     if (!targetCtx) throw new Error('新对话上下文不可用');
     const targetChat = targetCtx.chat ?? [];
+    const targetSession = captureSession();
+    const sameCharacter = JSON.stringify(JSON.parse(targetSession.key).slice(0, 2)) === JSON.stringify(JSON.parse(sourceSession.key).slice(0, 2));
+    const expectedEpoch = !ctx.eventSource || targetSession.epoch === sourceSession.epoch + 1;
+    if (!sameCharacter || !expectedEpoch || targetChat === sourceChat || targetCtx.getCurrentChatId?.() === sourceChatId || targetChat.some(m => m.is_user || m.extra?.bbs_leaf) || memory.summaries.length || anchorState.anchors.length || externalState.notes.length) throw new Error('新聊天身份不明确或已存在数据，已停止写入');
 
     // 确保有 #0 锚点楼:种子叶子(承载全量状态 delta + 合并摘要文本)必须挂在一条 #0 上。
     // 卡有开场白 → 复用 #0 当锚点(清空正文、设系统楼,删其余开场白);
@@ -387,16 +412,29 @@ export async function createNewChatWithCarryover(): Promise<boolean> {
       }
     }
 
+    // 融合数据一同迁移：保留全部版本/外部事项；旧窗口外来源映射为种子楼。
+    memory.varTemplates.chat = sourceTemplate;
+    replaceAnchors(sourceAnchors.map(a => {
+      const mapped = floorMap.get(a.floor);
+      return { ...a, floor: mapped ?? 0, source: a.source === 'chat' && mapped === undefined ? 'manual' as const : a.source,
+        origin: mapped === undefined ? undefined : a.origin,
+        note: [a.note, `继承自聊天 ${sourceChatId} #${a.floor}`].filter(Boolean).join('；') };
+    }));
+    replaceExternal(sourceExternal.map(n => ({ ...n, floor: typeof n.floor === 'number' ? floorMap.get(n.floor) ?? 0 : undefined })));
+
     // 落盘 + 重算 + 刷新
     recomputeDerived();
     saveMemory();
     flushLeavesNow();
     await targetCtx.saveChat();
+    assertSession(targetSession);
     if (typeof targetCtx.saveMetadata === 'function') await targetCtx.saveMetadata();
+    assertSession(targetSession);
     if (typeof targetCtx.reloadCurrentChat === 'function') await targetCtx.reloadCurrentChat();
+    if (!sessionCurrent(targetSession)) return false;
     refreshInjection();
 
-    toast(`已创建新对话:携带 AI ${carryMessages.filter(m => !m.is_user).length} 条,旧剧情摘要 ${mergedSummary ? '1' : '0'} 条`, 'success');
+    toast(`已创建新对话:携带 AI ${carryMessages.filter(m => !m.is_user).length} 条,旧剧情摘要 ${mergedSummary ? '1' : '0'} 条、锚点 ${sourceAnchors.length} 版、外部记录 ${sourceExternal.length} 条（含聊天变量模板）`, 'success');
     return true;
   } catch (e) {
     toast(`写入新对话失败:${e instanceof Error ? e.message : String(e)}`, 'error');

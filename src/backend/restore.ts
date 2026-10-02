@@ -1,3 +1,8 @@
+import { captureSession, assertSession, identifyMessage, matchesMessage, type MessageIdentity } from '@/st/session';
+import { validSnapshot, validLeaf, validSummary, validIdentity, validAnchor, validExternal, safeJson } from './schema';
+import { BUNDLES_META_KEY, currentBundleHashes } from '@/memory/vector/scope';
+import { invalidateRecallCache } from '@/memory/vector/cache';
+import { scheduleVectorIndex } from '@/memory/vector';
 /**
  * 恢复点 + 回收站恢复 + 完整快照(融合版新增;思路来自世界背面的"恢复点"与白鸟数据的 trash)。
  *
@@ -10,7 +15,7 @@ import { shallowReactive } from 'vue';
 import { getContext } from '@/st/context';
 import { apiSettings } from '@/api/settings';
 import { memory, saveMemory, recomputeDerived, scheduleLeafFlush, flushLeavesNow } from '@/memory/store';
-import { getLeaf } from '@/memory/apply';
+import { getLeaf, deriveMemory } from '@/memory/apply';
 import { refreshInjection } from '@/memory/inject';
 import type { LeafExtra, MemSummary, VarTemplate } from '@/memory/types';
 import { anchorsSnapshot, replaceAnchors, anchorState, type AnchorEntry } from '@/anchor/store';
@@ -18,13 +23,16 @@ import { externalSnapshot, replaceExternal, externalState, type ExternalNote } f
 import { trashRemove, trashState, type TrashEntry } from './trash';
 
 export const RESTORE_META_KEY = 'baibai_book_restore';
-export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_VERSION = 2;
 
 export interface MemorySnapshot {
   snapshotVersion: number;
   createdAt: number;
   pluginVersion: string;
   chatId: string;
+  owner: string;
+  messages: MessageIdentity[];
+  bundles: string[];
   charName: string;
   floors: number;
   summaries: MemSummary[];
@@ -57,6 +65,9 @@ export function loadRestorePoints(): void {
   for (const x of Array.isArray(raw?.points) ? raw!.points : []) {
     const p = x as Partial<RestorePoint>;
     if (!p || typeof p.id !== 'string' || !p.snapshot || typeof p.snapshot !== 'object') continue;
+    // 旧版点只保留供导出/人工核对，不把缺失字段交给 UI 或恢复器。
+    const snap = p.snapshot;
+    if (!safeJson(snap) || !Array.isArray(snap.summaries) || !Array.isArray(snap.leaves) || !Array.isArray(snap.anchors) || !Number.isSafeInteger(snap.floors)) continue;
     points.push({ id: p.id, createdAt: Number(p.createdAt ?? 0), reason: String(p.reason ?? ''), snapshot: p.snapshot as MemorySnapshot });
   }
   restoreState.points = points;
@@ -83,10 +94,14 @@ export function buildSnapshot(): MemorySnapshot {
     const leaf = getLeaf(m);
     if (leaf) leaves.push({ msgIndex: i, leaf: JSON.parse(JSON.stringify(leaf)) });
   });
+  scheduleLeafFlush(); // 持久化消息身份，与聊天一起保存
   return {
     snapshotVersion: SNAPSHOT_VERSION,
     createdAt: Date.now(),
     pluginVersion,
+    owner: captureSession().key,
+    messages: chat.map(identifyMessage),
+    bundles: [...currentBundleHashes()],
     chatId: String(ctx?.getCurrentChatId?.() ?? ''),
     charName: String(ctx?.name2 ?? ''),
     floors: chat.length,
@@ -100,7 +115,7 @@ export function buildSnapshot(): MemorySnapshot {
 
 /** 快照是否"有内容"(避免把空状态当恢复点存一堆) */
 export function snapshotIsEmpty(s: MemorySnapshot): boolean {
-  return !s.summaries.length && !s.leaves.length && !s.anchors.length && !s.external.length;
+  return !s.summaries.length && !s.leaves.length && !s.anchors.length && !s.external.length && !s.bundles?.length && !Object.keys(s.varsTemplate?.json ?? {}).length && !s.varsTemplate?.meaning && !s.varsTemplate?.rule;
 }
 
 /** 建恢复点;空状态不建。返回新恢复点或 null */
@@ -111,6 +126,8 @@ export function createRestorePoint(reason: string): RestorePoint | null {
   const point: RestorePoint = { id: `rp_${Date.now().toString(36)}_${seq}`, createdAt: Date.now(), reason: reason.slice(0, 80), snapshot };
   const keep = Math.max(1, apiSettings.backend?.restorePoints ?? 3);
   restoreState.points = [point, ...restoreState.points].slice(0, keep);
+  const budget = 8 * 1024 * 1024;
+  while (restoreState.points.length > 1 && new TextEncoder().encode(JSON.stringify(restoreState.points)).length > budget) restoreState.points = restoreState.points.slice(0, -1);
   saveRestorePoints();
   return point;
 }
@@ -124,63 +141,56 @@ export function deleteRestorePoint(id: string): boolean {
 
 /**
  * 把快照应用到当前聊天(整份覆盖)。
- * 叶子按 msgIndex 回写到消息 extra;楼层数对不上的部分跳过(并计入 skippedLeaves)。
+ * v2 对同一聊天的全部原始消息前缀验证 ID/正文指纹/swipe；发生冲突整份拒绝，不按下标猜测。
  * 应用前会自动再建一个"恢复前"的恢复点,保证可反悔。
  */
-export function applySnapshot(s: MemorySnapshot, opts: { makePoint?: boolean } = {}): { skippedLeaves: number } {
-  if (opts.makePoint !== false) createRestorePoint('恢复前自动保存');
+export function applySnapshot(input: MemorySnapshot, opts: { makePoint?: boolean } = {}): { skippedLeaves: number } {
+  const s = parseSnapshot(input);
+  if (!s) throw new Error('快照版本或结构不受支持（需 v2 身份快照）；原数据未修改');
   const ctx = getContext();
-  const chat = ctx?.chat ?? [];
+  const session = captureSession();
+  const chat = ctx?.chat;
+  if (!ctx?.chatMetadata || !chat || s.chatId !== String(ctx.getCurrentChatId?.() ?? '') || s.owner !== session.key) throw new Error('快照不属于当前角色/聊天，禁止按楼层覆盖');
+  if (chat.length < s.floors || s.messages.some((identity, i) => !matchesMessage(chat[i], identity))) throw new Error('聊天正文、楼序或 swipe 与快照不一致；为防错位已取消整份恢复。请先还原对应的聊天正文');
+  const staged = JSON.parse(JSON.stringify(chat)) as typeof chat;
+  for (const m of staged) if (m.extra) delete m.extra.bbs_leaf;
+  for (const { msgIndex, leaf } of s.leaves) {
+    if (staged[msgIndex].is_user) throw new Error('快照叶子指向用户楼，已拒绝恢复');
+    (staged[msgIndex].extra ??= {}).bbs_leaf = leaf;
+  }
+  // 用目标模板在副本完整重放；校验/重放失败前绝不清理当前叶子或 metadata。
+  deriveMemory(staged, undefined, { ...memory.varTemplates, chat: s.varsTemplate });
+  assertSession(session);
+  if (opts.makePoint !== false) createRestorePoint('恢复前自动保存');
+  assertSession(session);
   flushLeavesNow();
-  // 先清空现有叶子,再回写快照里的
-  for (const m of chat) {
-    if (m?.extra && 'bbs_leaf' in m.extra) delete (m.extra as Record<string, unknown>).bbs_leaf;
-  }
-  let skipped = 0;
-  for (const { msgIndex, leaf } of s.leaves ?? []) {
-    const m = chat[msgIndex];
-    if (!m || m.is_user) {
-      skipped++;
-      continue;
-    }
-    (m.extra ??= {}).bbs_leaf = JSON.parse(JSON.stringify(leaf));
-  }
-  memory.summaries = JSON.parse(JSON.stringify(Array.isArray(s.summaries) ? s.summaries : []));
-  if (s.varsTemplate && typeof s.varsTemplate === 'object') memory.varTemplates.chat = JSON.parse(JSON.stringify(s.varsTemplate));
+  for (const m of chat) if (m.extra) delete m.extra.bbs_leaf;
+  for (const { msgIndex, leaf } of s.leaves) (chat[msgIndex].extra ??= {}).bbs_leaf = leaf;
+  memory.summaries = s.summaries;
+  memory.varTemplates.chat = s.varsTemplate;
+  (ctx.chatMetadata as Record<string, unknown>)[BUNDLES_META_KEY] = s.bundles;
   recomputeDerived();
   saveMemory();
   scheduleLeafFlush();
-  replaceAnchors(Array.isArray(s.anchors) ? s.anchors : []);
-  replaceExternal(Array.isArray(s.external) ? s.external : []);
+  replaceAnchors(s.anchors);
+  replaceExternal(s.external);
+  invalidateRecallCache();
+  scheduleVectorIndex();
   refreshInjection();
-  return { skippedLeaves: skipped };
+  return { skippedLeaves: 0 };
 }
 
 export function restoreFromPoint(id: string): { ok: boolean; skippedLeaves: number } {
   const p = restoreState.points.find(x => x.id === id);
-  if (!p) return { ok: false, skippedLeaves: 0 };
+  if (!p || !safeJson(p)) return { ok: false, skippedLeaves: 0 };
   const r = applySnapshot(p.snapshot);
   return { ok: true, skippedLeaves: r.skippedLeaves };
 }
 
 /** 校验导入的快照 JSON 是否形如 MemorySnapshot */
 export function parseSnapshot(raw: unknown): MemorySnapshot | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  if (!Array.isArray(o.summaries) || !Array.isArray(o.leaves)) return null;
-  return {
-    snapshotVersion: Number(o.snapshotVersion ?? 1),
-    createdAt: Number(o.createdAt ?? 0),
-    pluginVersion: String(o.pluginVersion ?? ''),
-    chatId: String(o.chatId ?? ''),
-    charName: String(o.charName ?? ''),
-    floors: Number(o.floors ?? 0),
-    summaries: o.summaries as MemSummary[],
-    leaves: (o.leaves as Array<{ msgIndex: number; leaf: LeafExtra }>).filter(l => l && typeof l.msgIndex === 'number' && l.leaf),
-    varsTemplate: (o.varsTemplate as VarTemplate) ?? { json: {}, meaning: '', rule: '' },
-    anchors: Array.isArray(o.anchors) ? (o.anchors as AnchorEntry[]) : [],
-    external: Array.isArray(o.external) ? (o.external as ExternalNote[]) : [],
-  };
+  try { return validSnapshot(raw) ? JSON.parse(JSON.stringify(raw)) as MemorySnapshot : null; }
+  catch { return null; }
 }
 
 /* ======================= 回收站恢复 ======================= */
@@ -195,76 +205,96 @@ export function parseSnapshot(raw: unknown): MemorySnapshot | null {
 export function restoreTrashEntry(id: string): { ok: boolean; message: string } {
   const item = trashState.items.find(i => i.id === id);
   if (!item) return { ok: false, message: '回收站里没有这条记录' };
-  const r = applyTrashPayload(item);
+  let r: { ok: boolean; message: string };
+  try { r = applyTrashPayload(item); } catch (e) { return { ok: false, message: e instanceof Error ? e.message : String(e) }; }
   if (r.ok) {
     trashRemove(id);
+    invalidateRecallCache();
+    scheduleVectorIndex();
     refreshInjection();
   }
   return r;
 }
 
-function restoreSummaries(list: MemSummary[]): number {
-  let n = 0;
-  for (const s of list) {
-    if (!s || typeof s.id !== 'string') continue;
-    if (memory.summaries.some(x => x.id === s.id)) continue;
-    memory.summaries.push(JSON.parse(JSON.stringify(s)));
-    n++;
-  }
-  return n;
-}
-
-function restoreLeaves(list: Array<{ msgIndex: number; leaf: LeafExtra }>): { ok: number; skipped: number } {
+interface TrashLeaf { msgIndex: number; identity?: MessageIdentity; leaf: LeafExtra }
+function planTrashLeaves(list: TrashLeaf[]): Array<{ index: number; leaf: LeafExtra }> {
   const chat = getContext()?.chat ?? [];
-  let ok = 0;
-  let skipped = 0;
-  for (const { msgIndex, leaf } of list) {
-    const m = chat[msgIndex];
-    if (!m || m.is_user || getLeaf(m)) {
-      skipped++;
-      continue;
-    }
-    (m.extra ??= {}).bbs_leaf = JSON.parse(JSON.stringify(leaf));
-    ok++;
+  const plan: Array<{ index: number; leaf: LeafExtra }> = [];
+  const ids = new Set<string>();
+  for (const x of list) {
+    if (!x || !validLeaf(x.leaf) || !validIdentity(x.identity)) throw new Error('旧回收条目缺少消息身份或结构不合法，不能安全恢复');
+    const matches = chat.map((m, index) => ({ m, index })).filter(({ m }) => matchesMessage(m, x.identity));
+    if (matches.length !== 1 || matches[0].m.is_user || getLeaf(matches[0].m) || ids.has(x.identity!.id)) throw new Error('原消息已删除、修改、切换 swipe 或已有摘要；条目已保留在回收站');
+    ids.add(x.identity!.id);
+    plan.push({ index: matches[0].index, leaf: JSON.parse(JSON.stringify(x.leaf)) });
   }
-  return { ok, skipped };
+  return plan;
+}
+function commitTrashLeaves(plan: Array<{ index: number; leaf: LeafExtra }>): void {
+  const chat = getContext()!.chat;
+  for (const x of plan) (chat[x.index].extra ??= {}).bbs_leaf = x.leaf;
+}
+function assertForest(summaries: MemSummary[], additions: Array<{ index: number; leaf: LeafExtra }> = []): void {
+  if (!summaries.every(validSummary)) throw new Error('回收站总结结构不合法');
+  const ids = new Map<string, number>();
+  for (const m of getContext()?.chat ?? []) { const leaf = getLeaf(m); if (leaf) ids.set(leaf.id, 0); }
+  for (const x of additions) { if (ids.has(x.leaf.id)) throw new Error('叶子 ID 冲突'); ids.set(x.leaf.id, 0); }
+  for (const x of summaries) { if (ids.has(x.id)) throw new Error('总结 ID 冲突'); ids.set(x.id, x.level); }
+  const parents = new Set<string>();
+  for (const x of summaries) for (const id of x.childIds) {
+    if (!ids.has(id) || ids.get(id)! >= x.level || parents.has(id)) throw new Error('依赖节点缺失或父子关系冲突，请先恢复依赖');
+    parents.add(id);
+  }
 }
 
 function applyTrashPayload(item: TrashEntry): { ok: boolean; message: string } {
   const p = item.payload as Record<string, unknown> | null;
-  if (!p) return { ok: false, message: '条目没有可恢复的数据' };
+  if (!p || !safeJson(p)) return { ok: false, message: '条目没有可恢复的数据' };
   switch (item.kind) {
     case 'summary': {
-      const n = restoreSummaries([p as unknown as MemSummary]);
-      if (n) {
-        saveMemory();
-        return { ok: true, message: '总结节点已放回' };
+      const node = (p.node ?? p) as unknown as MemSummary;
+      if (!validSummary(node) || memory.summaries.some(x => x.id === node.id)) return { ok: false, message: '总结结构不合法或同 ID 节点已存在' };
+      const proposed: MemSummary[] = JSON.parse(JSON.stringify([...memory.summaries, node]));
+      for (const edge of Array.isArray(p.parents) ? p.parents : []) {
+        if (!edge || typeof edge.id !== 'string' || !Number.isInteger(edge.index) || !Array.isArray(edge.expected)) throw new Error('父边数据损坏');
+        const parent = proposed.find(x => x.id === edge.id);
+        if (!parent || JSON.stringify(parent.childIds) !== JSON.stringify(edge.expected)) throw new Error('父总结已变更；条目保留，请先恢复父节点或使用完整恢复点');
+        parent.childIds.splice(edge.index, 0, node.id);
       }
-      return { ok: false, message: '森林里已有同 id 的节点' };
+      assertForest(proposed);
+      memory.summaries = proposed;
+      saveMemory();
+      return { ok: true, message: p.node ? '总结及原父子关系已恢复' : '旧格式总结已恢复（旧条目没有父边信息）' };
     }
     case 'subtree': {
-      const sums = restoreSummaries(Array.isArray(p.summaries) ? (p.summaries as MemSummary[]) : []);
-      const lv = restoreLeaves(Array.isArray(p.leaves) ? (p.leaves as Array<{ msgIndex: number; leaf: LeafExtra }>) : []);
-      recomputeDerived();
-      saveMemory();
-      scheduleLeafFlush();
-      return { ok: true, message: `已放回 ${sums} 个总结节点、${lv.ok} 条叶子${lv.skipped ? `(${lv.skipped} 条叶子因楼层已变跳过)` : ''}` };
+      if (!Array.isArray(p.summaries) || !Array.isArray(p.leaves)) throw new Error('子树结构不合法');
+      const plan = planTrashLeaves(p.leaves as TrashLeaf[]);
+      const proposed = [...memory.summaries, ...p.summaries] as MemSummary[];
+      assertForest(proposed, plan);
+      commitTrashLeaves(plan);
+      memory.summaries = JSON.parse(JSON.stringify(proposed));
+      recomputeDerived(); saveMemory(); scheduleLeafFlush();
+      return { ok: true, message: `已完整恢复 ${p.summaries.length} 个总结、${plan.length} 条叶子` };
     }
     case 'leaf': {
-      const lv = restoreLeaves([p as unknown as { msgIndex: number; leaf: LeafExtra }]);
-      if (!lv.ok) return { ok: false, message: '原楼层不存在或已有新摘要,无法放回' };
-      recomputeDerived();
-      saveMemory();
-      scheduleLeafFlush();
-      return { ok: true, message: '叶子摘要已放回' };
+      const plan = planTrashLeaves([p as unknown as TrashLeaf]);
+      if (p.summaries !== undefined && !Array.isArray(p.summaries)) throw new Error('祖先总结结构不合法');
+      const proposed = [...memory.summaries, ...((p.summaries as MemSummary[] | undefined) ?? [])];
+      assertForest(proposed, plan);
+      commitTrashLeaves(plan);
+      memory.summaries = JSON.parse(JSON.stringify(proposed));
+      recomputeDerived(); saveMemory(); scheduleLeafFlush();
+      return { ok: true, message: '叶子已恢复到身份匹配的原消息' };
     }
     case 'anchor': {
+      if (!validAnchor(p)) throw new Error('锚点结构不合法');
       const a = p as unknown as AnchorEntry;
       if (anchorState.anchors.some(x => x.id === a.id)) return { ok: false, message: '已存在同 id 的锚点' };
       replaceAnchors([...anchorState.anchors, a].sort((x, y) => x.version - y.version));
       return { ok: true, message: `锚点日记 第${a.version}版 已放回` };
     }
     case 'external': {
+      if (!validExternal(p)) throw new Error('外部记录结构不合法');
       const n = p as unknown as ExternalNote;
       if (externalState.notes.some(x => x.id === n.id && x.source === n.source)) return { ok: false, message: '已存在同 id 的外部记录' };
       replaceExternal([...externalState.notes, n]);

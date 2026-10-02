@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Patch 月夜来信 1.5.2 bundle -> 1.6.2 (柏宝书联动). Textual, anchor-based, every anchor must match exactly once."""
+"""Patch 月夜来信 1.5.2 bundle -> 1.6.3 (柏宝书联动). Textual, anchor-based, every anchor must match exactly once."""
 import pathlib, sys
 
 # 用法: python3 apply_phone_patch.py <1.5.2 原始脚本 content 导出的 .js> <输出 .js>
 # 原始脚本 = 角色卡 data.extensions.tavern_helper.scripts[id=40d8092b-...].content,或 导入版 JSON 的 content 字段。
 P = pathlib.Path(__file__).resolve().parent
 SRC = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else P.parent / 'base' / 'tsukiyo-phone-1.5.2.js'
-OUT = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else P.parent / 'tsukiyo-phone-1.6.2.js' 
+OUT = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else P.parent / 'tsukiyo-phone-1.6.3.js' 
 js = SRC.read_text(encoding='utf-8')
-NEW_VERSION = '1.6.2'
+NEW_VERSION = '1.6.3'
 
 
 def rep(old, new, count=1):
@@ -20,7 +20,7 @@ def rep(old, new, count=1):
 
 # 0. banner + version
 rep('/* 月夜来信 · 小手机 v1.5.2（',
-    '/* 月夜来信 · 小手机 v1.6.2（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · ')
+    '/* 月夜来信 · 小手机 v1.6.3（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · ')
 rep('var package_default = { name: "tsukiyo-phone", version: "1.5.2",',
     'var package_default = { name: "tsukiyo-phone", version: "' + NEW_VERSION + '",')
 

@@ -1,3 +1,4 @@
+import { captureSession, sessionCurrent, assertSession, captureInput, StaleTaskError, type SessionTicket } from '@/st/session';
 import type { ChatMsg } from '@/api/client';
 import { mainApiAvailable, requestCompletion, requestViaMainApi } from '@/api/client';
 import { apiSettings, engineActiveHere, getChannelForTask } from '@/api/settings';
@@ -14,7 +15,7 @@ import { renderSourceHints, type SourceExcerpt } from './sourceHints';
 import { memory, recomputeDerived, scheduleLeafFlush } from './store';
 import type { LeafExtra, SummaryDelta } from './types';
 import { scheduleVectorIndex } from './vector';
-import { buildExternalSummaryMaterial } from '@/bridge/external';
+import { buildExternalSummaryMaterial, externalState } from '@/bridge/external';
 import { createRestorePoint } from '@/backend/restore';
 import { invalidateRecallCache } from './vector/cache';
 import { clearRecallInjection } from './vector/recall';
@@ -596,6 +597,7 @@ export async function handleGenerationIntercept(
   if (!ctx) return false;
   if (!ctx.getCurrentChatId?.()) return false; // 欢迎页:无聊天不拦
   const chat = ctx.chat ?? [];
+  const session = captureSession();
   normalizeBacklogNotices(chat); // 兼容升级前已存在但尚未标记的提示楼
   const skipLastAi = shouldSkipLastAiForGeneration(chat, type);
   const blocking = apiSettings.backlogPolicy === 'block';
@@ -619,9 +621,11 @@ export async function handleGenerationIntercept(
     if (inflight) {
       toast('正在为开场白建立时间锚点,请稍候…', 'info');
       await waitSummary(inflight);
+      if (!sessionCurrent(session)) return false;
     } else if (!busy) {
       toast('正在为开场白建立时间锚点,请稍候…', 'info');
       await waitSummary(runSummary(opening));
+      if (!sessionCurrent(session)) return false;
     }
     // 摘要落盘后 refreshInjection 已把「当前时间」刷成开场白时间;继续走洞判定(通常放行)。
   }
@@ -646,6 +650,7 @@ export async function handleGenerationIntercept(
       attempted = true;
       toast('正在补摘前一楼层,请稍候…', 'info');
       stillRunning = !(await waitSummary(run));
+      if (!sessionCurrent(session)) return false;
     }
     holes = holesExceptLast(chat);
     if (holes.length < 1) {
@@ -664,9 +669,9 @@ export async function handleGenerationIntercept(
       // 后台追补最旧的一个洞(多洞时 maybeSummarizePrevAi 会主动停手,所以由这里兜一楼);不等待。
       const target = holes[0];
       void runSummary(target)
-        .then(() => afterSummaryHideAndInject(chat))
+        .then(() => afterSummaryHideAndInject(chat, session))
         .catch(e => {
-          engineState.lastError = e instanceof Error ? e.message : String(e);
+          if (sessionCurrent(session)) engineState.lastError = e instanceof Error ? e.message : String(e);
         });
     }
     return false;
@@ -704,9 +709,10 @@ export async function handleGenerationIntercept(
 }
 
 /** 摘要后的统一收尾:同步滑动隐藏 + 刷新注入(自动隐藏已并入摘要流程,不再有独立开关) */
-async function afterSummaryHideAndInject(chat: STMessage[]): Promise<void> {
-  await syncWindowHiddenState(chat);
-  refreshInjection();
+async function afterSummaryHideAndInject(chat: STMessage[], session: SessionTicket = captureSession()): Promise<void> {
+  if (!sessionCurrent(session) || session.chat !== chat) return;
+  await syncWindowHiddenState(chat, session);
+  if (sessionCurrent(session)) refreshInjection();
 }
 
 /**
@@ -716,9 +722,10 @@ async function afterSummaryHideAndInject(chat: STMessage[]): Promise<void> {
  * 旧总结时立即同步覆盖范围,不受自动摘要开关影响。
  */
 export async function syncHiddenNow(force = false): Promise<void> {
+  const session = captureSession();
   const chat = getContext()?.chat ?? [];
   if (force || (engineActiveHere() && apiSettings.autoSummaryEnabled)) {
-    await afterSummaryHideAndInject(chat);
+    await afterSummaryHideAndInject(chat, session);
   } else {
     refreshInjection();
   }
@@ -737,14 +744,16 @@ export async function checkAutoSummary(): Promise<void> {
   const ctx = getContext();
   if (!ctx) { console.log('[柏宝书] 早退:无 ctx'); return; }
   const chat = ctx.chat ?? [];
+  const session = captureSession();
   if (chat.length === 0) { console.log('[柏宝书] 早退:chat 为空'); return; }
 
   const floors = pendingAiFloors(chat);
   console.log('[柏宝书] 待摘要楼层 =', floors);
   for (const floor of floors) {
+    if (!sessionCurrent(session)) break;
     await runSummary(floor);
   }
-  await afterSummaryHideAndInject(chat);
+  await afterSummaryHideAndInject(chat, session);
 }
 
 /**
@@ -757,10 +766,11 @@ export async function summarizeFloor(floor: number): Promise<void> {
   const ctx = getContext();
   if (!ctx) return;
   const chat = ctx.chat ?? [];
+  const session = captureSession();
   if (importedHistoryCovers(floor)) return;
   if (!isAiFloor(chat[floor]) || leafValid(chat[floor])) return;
   await runSummary(floor);
-  await afterSummaryHideAndInject(chat);
+  await afterSummaryHideAndInject(chat, session);
 }
 
 /**
@@ -775,6 +785,7 @@ export async function regenerateFloor(floor: number): Promise<boolean> {
   const ctx = getContext();
   if (!ctx) return false;
   const chat = ctx.chat ?? [];
+  const session = captureSession();
   if (!isAiFloor(chat[floor]) || !leafValid(chat[floor])) return false;
   const oldLeaf = getLeaf(chat[floor]);
   if (!oldLeaf) return false;
@@ -783,7 +794,7 @@ export async function regenerateFloor(floor: number): Promise<boolean> {
     await runSummary(floor, { replaceLeaf: oldLeaf, checkResummary: false });
     return getLeaf(chat[floor]) !== oldLeaf && !engineState.lastError;
   } finally {
-    await afterSummaryHideAndInject(chat);
+    await afterSummaryHideAndInject(chat, session);
   }
 }
 
@@ -804,6 +815,7 @@ export async function setFloorOmit(floor: number, on: boolean): Promise<void> {
   const ctx = getContext();
   if (!ctx) return;
   const chat = ctx.chat ?? [];
+  const session = captureSession();
   const m = chat[floor];
   if (!m) return;
   const already = !!m.extra?.bbs_omit;
@@ -841,6 +853,7 @@ export async function maybeSummarizePrevAi(
 ): Promise<void> {
   const ctx = getContext();
   const chat = ctx?.chat ?? [];
+  const session = captureSession();
   if (!engineActiveHere()) return;
   if (!apiSettings.autoSummaryEnabled) return;
   if (busy) return;
@@ -861,7 +874,7 @@ export async function maybeSummarizePrevAi(
   const pending = pendingAiFloors(chat);
   const target = pending.find(f => f <= ceiling);
   if (target === undefined) {
-    await afterSummaryHideAndInject(chat);
+    await afterSummaryHideAndInject(chat, session);
     return;
   }
 
@@ -873,10 +886,10 @@ export async function maybeSummarizePrevAi(
     const run = runSummary(target, { onRequestStart: markStarted });
     void run
       .then(async () => {
-        await afterSummaryHideAndInject(chat);
+        await afterSummaryHideAndInject(chat, session);
       })
       .catch(e => {
-        engineState.lastError = e instanceof Error ? e.message : String(e);
+        if (sessionCurrent(session)) engineState.lastError = e instanceof Error ? e.message : String(e);
       });
     // 早退/失败时 run 会先完成,不会因为启动屏障未触发而卡住正文生成。
     await Promise.race([
@@ -887,7 +900,7 @@ export async function maybeSummarizePrevAi(
   }
 
   await runSummary(target);
-  await afterSummaryHideAndInject(chat);
+  await afterSummaryHideAndInject(chat, session);
 }
 
 /**
@@ -931,7 +944,8 @@ export function coalesceRanges(indices: number[]): Array<[number, number]> {
  * /unhide,同时用 extra.bbs_hidden 私有标记区分「我们隐藏的」与「ST 原生系统楼」。
  * 只隐藏已被摘要覆盖的,绝不制造信息黑洞。
  */
-async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
+async function syncWindowHiddenState(chat: STMessage[], session: SessionTicket = captureSession()): Promise<void> {
+  if (!sessionCurrent(session) || session.chat !== chat) return;
   const keepStart = resolveKeepStart(chat);
   const covered = coveredSet(chat);
   const imported = importedHistoryRanges();
@@ -957,6 +971,7 @@ async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
   const exec = ctx.executeSlashCommandsWithOptions;
   if (typeof exec === 'function') {
     for (const [start, end] of coalesceRanges(toUnhide)) {
+      if (!sessionCurrent(session)) return;
       const arg = start === end ? `${start}` : `${start}-${end}`;
       try {
         for (let i = start; i <= end; i++) {
@@ -967,6 +982,7 @@ async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
         }
         await exec(`/unhide ${arg}`);
       } catch (e) {
+        if (!sessionCurrent(session)) return;
         // /unhide 失败则回退到直接写 is_system,保证取消隐藏一定落地
         for (let i = start; i <= end; i++) {
           const m = chat[i];
@@ -982,12 +998,14 @@ async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
     }
 
     for (const [start, end] of coalesceRanges(toHide)) {
+      if (!sessionCurrent(session)) return;
       const arg = start === end ? `${start}` : `${start}-${end}`;
       try {
         // 预写私有标记 + 内存态,防止 /hide 异步期间的竞态 saveChat 覆盖
         for (let i = start; i <= end; i++) if (chat[i]) chat[i].extra = { ...(chat[i].extra ?? {}), bbs_hidden: true };
         await exec(`/hide ${arg}`);
       } catch (e) {
+        if (!sessionCurrent(session)) return;
         // /hide 失败则回退到直接写 is_system,保证隐藏一定落地
         for (let i = start; i <= end; i++) if (chat[i]) chat[i].is_system = true;
         engineState.lastError = `/hide ${arg} 失败: ${e instanceof Error ? e.message : String(e)}`;
@@ -1012,7 +1030,7 @@ async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
     }
     try {
       await ctx.saveChat();
-      await ctx.reloadCurrentChat();
+      if (sessionCurrent(session)) await ctx.reloadCurrentChat();
     } catch {
       /* 刷新失败不致命 */
     }
@@ -1033,14 +1051,21 @@ async function syncWindowHiddenState(chat: STMessage[]): Promise<void> {
 function resolveSender(
   task: TaskType,
 ): { send: (messages: ChatMsg[]) => Promise<string>; label: string } | { error: string } {
+  const session = captureSession();
+  const guarded = (send: (messages: ChatMsg[]) => Promise<string>) => async (messages: ChatMsg[]) => {
+    assertSession(session);
+    const result = await send(messages);
+    assertSession(session);
+    return result;
+  };
   const channel = getChannelForTask(task);
   if (channel) {
-    return { send: messages => requestCompletion(channel, messages), label: `渠道「${channel.name}」(${channel.model})` };
+    return { send: guarded(messages => requestCompletion(channel, messages)), label: `渠道「${channel.name}」(${channel.model})` };
   }
   if (!mainApiAvailable()) {
     return { error: '未指派副 API 渠道,且当前主 API 不可用(请填好主 API 后重试,或为本任务单独指派渠道)' };
   }
-  return { send: messages => requestViaMainApi(messages), label: '主 API(主界面当前在用)' };
+  return { send: guarded(messages => requestViaMainApi(messages)), label: '主 API(主界面当前在用)' };
 }
 
 /**
@@ -1059,6 +1084,7 @@ async function sendAndParse<T>(
     try {
       return parse(await send(messages));
     } catch (e) {
+      if (e instanceof StaleTaskError) throw e;
       lastErr = e;
       if (attempt < maxRetries) {
         console.log(`[柏宝书] 第 ${attempt + 1} 次尝试失败,重试:`, e instanceof Error ? e.message : String(e));
@@ -1201,6 +1227,9 @@ async function summarizeFloorWork(
 ): Promise<void> {
   const ctx = getContext();
   if (!ctx) throw new Error('无 ST 上下文');
+  const verifyInput = captureInput(chat, aiFloor + 1);
+  const forestBefore = JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]);
+  const verify = () => { if (!engineActiveHere()) throw new StaleTaskError(); verifyInput(); if (JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]) !== forestBefore) throw new StaleTaskError(); };
   if (!chat[aiFloor]) {
     throw new Error(`摘要失败:楼层 #${aiFloor} 已不存在(可能在请求期间被删除)`);
   }
@@ -1219,6 +1248,7 @@ async function summarizeFloorWork(
   const history = renderHistoryNodes(selectHistoryNodesBefore(memory.summaries, chat, beforeIndex));
 
   const worldInfo = await fetchWorldInfo(chat, targets, ctx.name1, ctx.name2);
+  verify();
   const charCard = fetchCharCard();
   const persona = fetchUserPersona();
 
@@ -1268,8 +1298,8 @@ async function summarizeFloorWork(
     { role: 'assistant', content: prefill },
   );
   options.onRequestStart?.();
-  const delta = await sendAndParse(sender.send, messages, raw => {
-    console.log('[柏宝书] 摘要原始返回(未清洗):\n', raw);
+  const delta = await sendAndParse(async messages => { verify(); const raw = await sender.send(messages); verify(); return raw; }, messages, raw => {
+
     const d = extractJsonObject<SummaryDelta>(raw);
     const summary = llmString(d?.summary);
     if (!d || !summary) {
@@ -1278,6 +1308,7 @@ async function summarizeFloorWork(
     return { ...d, summary } as SummaryDelta & { summary: string };
   });
 
+  verify();
   applyLeafForFloor(chat, aiFloor, delta, stateBefore, options.replaceLeaf);
   engineState.lastRunAt = Date.now();
 
@@ -1300,6 +1331,7 @@ async function runSummaryInner(aiFloor: number, options: RunSummaryOptions = {})
   const ctx = getContext();
   if (!ctx) return;
   const chat = ctx.chat ?? [];
+  const session = captureSession();
   if (!isAiFloor(chat[aiFloor])) { console.log('[柏宝书] runSummary 早退:非 AI 楼', aiFloor); return; }
   if (options.replaceLeaf && getLeaf(chat[aiFloor]) !== options.replaceLeaf) {
     engineState.lastError = `重新摘要失败:楼层 #${aiFloor} 的原摘要已发生变化`;
@@ -1313,9 +1345,9 @@ async function runSummaryInner(aiFloor: number, options: RunSummaryOptions = {})
   try {
     await summarizeFloorWork(chat, aiFloor, sender, options);
     // 摘要积累到阈值则触发总结
-    if (options.checkResummary !== false) await checkResummary();
+    if (sessionCurrent(session) && options.checkResummary !== false) await checkResummary();
   } catch (e) {
-    engineState.lastError = e instanceof Error ? e.message : String(e);
+    if (sessionCurrent(session)) engineState.lastError = e instanceof Error ? e.message : String(e);
   } finally {
     busy = false;
     engineState.running = false;
@@ -1382,6 +1414,9 @@ async function summarizeBatchWork(
 ): Promise<void> {
   const ctx = getContext();
   if (!ctx) throw new Error('无 ST 上下文');
+  const verifyInput = captureInput(chat, Math.max(...block) + 1);
+  const forestBefore = JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]);
+  const verify = () => { if (!engineActiveHere()) throw new StaleTaskError(); verifyInput(); if (JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]) !== forestBefore) throw new StaleTaskError(); };
   const covered = coveredSet(chat);
 
   // 块开头之前的状态/历史/世界书(整块统一口径,只取一次)
@@ -1401,6 +1436,7 @@ async function summarizeBatchWork(
 
   // 世界书按整块合并正文激活一次(省去逐楼激活)
   const worldInfo = await fetchWorldInfo(chat, allTargets, ctx.name1, ctx.name2);
+  verify();
   const charCard = fetchCharCard();
   const persona = fetchUserPersona();
 
@@ -1434,8 +1470,8 @@ async function summarizeBatchWork(
   );
 
   // 解析 { floors: [...] };校验长度等于块楼数(缺楼/多楼都算失败,触发重试/回退)
-  const list = await sendAndParse(sender.send, messages, raw => {
-    console.log('[柏宝书] 批量摘要原始返回(未清洗):\n', raw);
+  const list = await sendAndParse(async messages => { verify(); const raw = await sender.send(messages); verify(); return raw; }, messages, raw => {
+
     const d = extractJsonObject<{ floors?: SummaryDelta[] }>(raw);
     const floors = d?.floors;
     if (!Array.isArray(floors) || !floors.length) {
@@ -1458,6 +1494,7 @@ async function summarizeBatchWork(
   // 逐楼落叶(块内顺序,严格按 block 升序)。批量只取 summary + 起止时间:
   // 显式剥掉 items/plans/location —— 这些跨多楼难保顺序正确(易致计划/时间错乱),
   // 即便 AI 不听话硬产了也丢弃。结构化数据交给后续正常的逐楼自动摘要。
+  verify();
   block.forEach((f, idx) => {
     const r = list[idx];
     const lean: SummaryDelta = {
@@ -1497,6 +1534,7 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
   const ctx = getContext();
   if (!ctx) return { done: 0, total: 0, cancelled: false };
   const chat = ctx.chat ?? [];
+  const session = captureSession();
 
   // 目标楼层:显式传入则过滤成「当前确实待摘的 AI 楼」(防陈旧),否则取全部待摘
   const pending = new Set(pendingAiFloors(chat));
@@ -1511,7 +1549,7 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
   }
   const total = floors.length;
   if (total === 0) {
-    await afterSummaryHideAndInject(chat);
+    await afterSummaryHideAndInject(chat, session);
     return { done: 0, total: 0, cancelled: false };
   }
 
@@ -1530,17 +1568,21 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
   let cancelled = false;
   try {
     for (const block of batches) {
+      if (!sessionCurrent(session)) { cancelled = true; break; }
       if (batchState.cancelRequested) { cancelled = true; break; }
       try {
         await summarizeBatchWork(chat, block, sender);
       } catch (e) {
+        if (e instanceof StaleTaskError) { cancelled = true; break; }
         // 整块失败(已含重试)→ 回退:逐楼单独摘。单楼也可能失败(写 lastError),失败楼留作待摘,不中断后续。
         console.log('[柏宝书] 批量块失败,回退逐楼:', e instanceof Error ? e.message : String(e));
         for (const f of block) {
+          if (!sessionCurrent(session)) { cancelled = true; break; }
           if (!isAiFloor(chat[f]) || leafValid(chat[f])) continue; // 已被填或非 AI 楼:跳过
           try {
             await summarizeFloorWork(chat, f, sender);
           } catch (e2) {
+            if (e2 instanceof StaleTaskError) { cancelled = true; break; }
             engineState.lastError = e2 instanceof Error ? e2.message : String(e2);
           }
         }
@@ -1550,16 +1592,16 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
       batchState.done = done;
     }
     // 连锁触发总结(可能跨多层),失败写 lastError 不影响已落叶子
-    await checkResummary();
+    if (!cancelled && sessionCurrent(session)) await checkResummary();
   } catch (e) {
-    engineState.lastError = e instanceof Error ? e.message : String(e);
+    if (sessionCurrent(session)) engineState.lastError = e instanceof Error ? e.message : String(e);
   } finally {
     busy = false;
     engineState.running = false;
     batchState.running = false;
     batchState.cancelRequested = false;
   }
-  await afterSummaryHideAndInject(chat);
+  await afterSummaryHideAndInject(chat, session);
   return { done, total, cancelled };
 }
 
@@ -1659,6 +1701,7 @@ export async function checkResummary(): Promise<number> {
   const ctx = getContext();
   if (!ctx) return 0;
   const chat = ctx.chat ?? [];
+  const session = captureSession();
 
   let made = 0; // 本次连锁共生成的总结条数
 
@@ -1682,6 +1725,8 @@ export async function checkResummary(): Promise<number> {
       return made;
     }
 
+    const verifyInput = captureInput(chat);
+    const forestBefore = JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]);
     const batch = roots.slice(0, threshold);
     const { content, hints } = joinNodesForResummary(batch);
     // 传**输出层级**(level+1):L1(普通总结,300-500字)/ L2+(二次总结,字数随输入动态)
@@ -1699,7 +1744,7 @@ export async function checkResummary(): Promise<number> {
       );
       // 发请求 + 解析,失败按设置重试(请求报错或 JSON 无效/缺 summary 都算失败)
       const delta = await sendAndParse(sender.send, messages, raw => {
-        console.log('[柏宝书] 总结原始返回(未清洗):\n', raw);
+
         const d = extractJsonObject<{ summary?: string }>(raw);
         const summary = llmString(d?.summary);
         if (!summary) {
@@ -1710,6 +1755,8 @@ export async function checkResummary(): Promise<number> {
         return { summary };
       });
 
+      verifyInput();
+      if (JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]) !== forestBefore) throw new StaleTaskError();
       // 生成上层节点收纳这批(**不删 batch**),时间戳取批内最新,排在它们之后
       const newCreatedAt = Math.max(...batch.map(s => s.createdAt)) + 1;
       // 起止时间:batch 已按时间升序 → 首个有起始的作 start,末个有结束的作 end
@@ -1728,7 +1775,7 @@ export async function checkResummary(): Promise<number> {
       refreshInjection();
       // 不 break:继续外层 for,上一层可能也攒够了 → 连锁压更高层
     } catch (e) {
-      engineState.lastError = e instanceof Error ? e.message : String(e);
+      if (sessionCurrent(session)) engineState.lastError = e instanceof Error ? e.message : String(e);
       return made; // 本层失败则停止连锁,下次再试
     }
   }
@@ -1805,6 +1852,7 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
   const ctx = getContext();
   if (!ctx) return { made: 0, error: '无 ST 上下文' };
   const chat = ctx.chat ?? [];
+  const session = captureSession();
 
   const all = collectSelectableNodes(chat);
   const picked: SelectableNode[] = [];
@@ -1842,6 +1890,8 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
   const sender = resolveSender('resummary');
   if ('error' in sender) return { made: 0, error: sender.error };
 
+  const verifyInput = captureInput(chat);
+  const forestBefore = JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]);
   const level = Math.max(...picked.map(n => n.level)) + 1;
   const { content, hints } = joinNodesForResummary(picked);
   const prompt = buildResummaryPrompt({ user: ctx.name1, char: ctx.name2, content, level });
@@ -1860,7 +1910,7 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
       { role: 'assistant', content: RESUMMARY_THINKING_PREFILL },
     );
     const delta = await sendAndParse(sender.send, messages, raw => {
-      console.log('[柏宝书] 强制总结原始返回(未清洗):\n', raw);
+
       const d = extractJsonObject<{ summary?: string }>(raw);
       const summary = llmString(d?.summary);
       if (!summary) {
@@ -1870,6 +1920,8 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
       return { summary };
     });
 
+    verifyInput();
+    if (JSON.stringify([memory.summaries, memory.varTemplates, externalState.notes]) !== forestBefore) throw new StaleTaskError();
     // 时间范围:picked 已按楼层升序 → 首个有起始的作 start,末个有结束的作 end(同 checkResummary)
     const timeStart = picked.find(s => s.timeStart)?.timeStart;
     const timeEnd = [...picked].reverse().find(s => s.timeEnd)?.timeEnd;
@@ -1885,13 +1937,13 @@ export async function summarizeSelected(nodeIds: string[]): Promise<{ made: numb
     recomputeDerived();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    engineState.lastError = msg;
+    if (sessionCurrent(session)) engineState.lastError = msg;
     return { made: 0, error: msg };
   } finally {
     busy = false;
     engineState.running = false;
   }
-  await afterSummaryHideAndInject(chat);
+  await afterSummaryHideAndInject(chat, session);
   return { made: 1 };
 }
 
@@ -1921,19 +1973,21 @@ export async function resummarizeNow(): Promise<number> {
  */
 let reactTimer: ReturnType<typeof setTimeout> | null = null;
 function reactToChatMutation(syncHidden = false): void {
+  const session = captureSession();
   // 缓存立即失效、索引另行防抖；UI/派生重算仍按下方 200ms 合并。
   scheduleVectorIndex();
   if (reactTimer) clearTimeout(reactTimer);
   reactTimer = setTimeout(() => {
     reactTimer = null;
+    if (!sessionCurrent(session)) return;
     pruneBrokenComps(); // 叶子失效 → 删包含它的整条祖先压缩链
     recomputeDerived(); // 删叶/陈旧 → 物品/计划回退;UI(derivedMeta)更新
     if (syncHidden && engineActiveHere() && apiSettings.autoSummaryEnabled) {
       void syncWindowHiddenState(getContext()?.chat ?? [])
         .catch(e => {
-          engineState.lastError = e instanceof Error ? e.message : String(e);
+          if (sessionCurrent(session)) engineState.lastError = e instanceof Error ? e.message : String(e);
         })
-        .finally(() => refreshInjection());
+        .finally(() => { if (sessionCurrent(session)) refreshInjection(); });
       return;
     }
     refreshInjection(); // 不再注入陈旧/已删叶子
@@ -1985,7 +2039,9 @@ export function bindEngine(): void {
   // 再走通用善后(清坏链/重算/刷新)。延迟一拍确保 ST 已把编辑写回 chat[messageId].mes。
   if (et.MESSAGE_EDITED) {
     es.on(et.MESSAGE_EDITED, (messageId?: number) => {
+      const session = captureSession();
       setTimeout(() => {
+        if (!sessionCurrent(session)) return;
         if (typeof messageId === 'number') {
           try { syncItemLogFromMessage(messageId); } catch (e) { console.warn('[柏宝书] 物品旁注反解析失败', e); }
         }

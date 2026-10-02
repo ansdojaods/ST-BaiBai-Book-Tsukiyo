@@ -1,6 +1,6 @@
 // Execute the actual built phone bundle, without its auto-start. No network or real ST.
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict'), path = require('node:path');
-let code = fs.readFileSync(path.join(__dirname, '..', 'tsukiyo-phone-1.6.2.js'), 'utf8');
+let code = fs.readFileSync(path.join(__dirname, '..', 'tsukiyo-phone-1.6.3.js'), 'utf8');
 code = code.slice(0, code.lastIndexOf('TsukiyoPhoneBundle.start(')).replace('return __toCommonJS(index_exports);',
   'return {PhoneActions, baibaiRuntime, baibaiReadEnabled, baibaiMemoryCandidates, baibaiFilterInput, actorContext, BaiBaiLink};');
 const window = {};
@@ -93,6 +93,33 @@ async function requestFor(method, args, on) {
     const link = new B.BaiBaiLink({ win: window, bridge: { mode: 'tavern' }, settings: { data: f.cfg }, repo: { data: f.data, snapshot: f.snap }, emit() {} });
     await assert.rejects(link.push(), /temporary/); await link.push(); assert.equal(calls, 2);
     f.cfg.ui.baibai.push = false; await link.push({ force: true }); assert.equal(calls, 2);
+  });
+  function syncFixture() {
+    const f = fixture(), saved = new Map();
+    window.STBaiBaiBook.phone.listNotes = () => [...saved.values()];
+    window.STBaiBaiBook.phone.pushNotes = (_source, rows) => { for (const r of rows) saved.set(r.id, { ...r }); return { added: rows.length }; };
+    const link = new B.BaiBaiLink({ win: window, bridge: { mode: 'tavern' }, settings: { data: f.cfg }, repo: { data: f.data, snapshot: f.snap }, emit() {} });
+    return { ...f, saved, link };
+  }
+  for (const status of ['cancelled', 'done', 'declined', 'expired']) await test('B06 agenda terminal status ' + status + ' updates and unpins old record', async () => {
+    const f = syncFixture(); f.data.agenda.push({ id: 'a1', title: '见面', status: 'confirmed', members: ['user', 'a'] });
+    await f.link.push(); assert.equal(f.saved.get('agenda:a1').pinned, true);
+    f.data.agenda[0].status = status; await f.link.push(); assert.equal(!!f.saved.get('agenda:a1').pinned, false); assert(!f.saved.get('agenda:a1').title.includes('已确认'));
+  });
+  for (const change of ['resolved', 'disabled', 'removed']) await test('B06 promise ' + change + ' retires its old pinned record, preserving message history', async () => {
+    const f = syncFixture(); f.data.memories.push({ id: 'p1', kind: 'promise', text: '一起吃饭', audience: ['user', 'a'], enabled: true });
+    await f.link.push(); f.saved.set('msg:old-outside-window', { id: 'msg:old-outside-window', kind: 'phone_chat', text: '历史消息' });
+    assert.equal(f.saved.get('promise:p1').pinned, true);
+    const p = f.data.memories.at(-1);
+    if (change === 'resolved') p.resolved = true;
+    if (change === 'disabled') p.enabled = false;
+    if (change === 'removed') f.data.memories.pop();
+    await f.link.push(); assert.equal(!!f.saved.get('promise:p1').pinned, false); assert(f.saved.has('msg:old-outside-window'));
+  });
+  await test('B06 deleting agenda writes a tombstone rather than replacing all source history', async () => {
+    const f = syncFixture(); f.data.agenda.push({ id: 'a1', title: '约定', status: 'confirmed', members: ['user'] });
+    await f.link.push(); f.data.agenda = []; await f.link.push();
+    assert.equal(f.saved.get('agenda:a1').title, '已移除事项'); assert.equal(f.saved.get('agenda:a1').pinned, false);
   });
   console.log(`PHONE_MEMORY_OK: ${cases} cases (all generation payloads tested with ON/OFF)`);
 })().catch(e => { console.error(e); process.exitCode = 1; });

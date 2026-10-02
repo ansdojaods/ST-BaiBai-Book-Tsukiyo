@@ -263,15 +263,21 @@
         if (!body) continue;
         rows.push({ id: "msg:" + m.id, kind: "phone_chat", title: scope + " · " + name(m.author), text: name(m.author) + "→" + to + "：" + body + (m.role === "character" && !m.read ? "（玩家尚未读）" : ""), time: text(m.story, 60) || void 0, floor });
       }
-      for (const a of s.agenda.filter((x) => ["proposed", "confirmed"].includes(x.status)).slice(-10)) {
+      for (const a of s.agenda) {
+        const active = ["proposed", "confirmed"].includes(a.status);
+        const status = ({ proposed: "待确认", confirmed: "已确认", cancelled: "已取消", canceled: "已取消", done: "已完成", completed: "已完成", declined: "已拒绝", expired: "已过期" })[a.status] || "已结束";
         const when = a.date ? text(a.date, 10) + (a.time ? " " + text(a.time, 5) : "") : "";
-        rows.push({ id: "agenda:" + a.id, kind: "phone_agenda", title: "手机约定 · " + (a.status === "confirmed" ? "已确认" : "待确认"), text: text(a.title, 160) + "（" + (a.status === "confirmed" ? "已确认" : "待确认") + "）" + (when ? " · " + when : "") + " · 参与：" + (a.members || []).map(name).join("、") + (a.note ? " · " + text(a.note, 120) : ""), time: when || void 0, floor, pinned: true });
+        rows.push({ id: "agenda:" + a.id, kind: "phone_agenda", title: "手机约定 · " + status, text: text(a.title, 160) + "（" + status + "）" + (when ? " · " + when : "") + " · 参与：" + (a.members || []).map(name).join("、") + (a.note ? " · " + text(a.note, 120) : ""), time: when || void 0, floor, pinned: active });
       }
       for (const p of s.feed.slice(-3)) {
         const body = text(p.text, 240);
         if (body) rows.push({ id: "feed:" + p.id, kind: "phone_moment", title: "动态 · " + name(p.author), text: name(p.author) + " 发了动态：" + body, floor });
       }
-      for (const m of s.memories.filter((x) => x.kind === "promise" && !x.resolved && x.enabled !== false && !x.bb).slice(-6)) rows.push({ id: "promise:" + m.id, kind: "phone_promise", title: "未完约定", text: text(m.text, 300) + "（知情：" + m.audience.map(name).join("、") + "）", floor, pinned: true });
+      for (const m of s.memories.filter((x) => x.kind === "promise" && !x.bb)) {
+        const active = !m.resolved && m.enabled !== false;
+        const status = m.enabled === false ? "已停用" : m.resolved ? "已完成" : "未完约定";
+        rows.push({ id: "promise:" + m.id, kind: "phone_promise", title: status, text: "（" + status + "）" + text(m.text, 300) + "（知情：" + m.audience.map(name).join("、") + "）", floor, pinned: active });
+      }
       return rows;
     }
     async push({ force = false } = {}) {
@@ -281,22 +287,31 @@
       this.busy = true;
       try {
         const rows = this.notes(s, snap);
-        const sig = fingerprint(rows.map((r) => [r.id, r.text]));
+        const sig = fingerprint([snap.owner || "", rows.map((r) => [r.id, r.title, r.text, !!r.pinned])]);
         if (!force && sig === this.lastSig) return null;
         const existing = /* @__PURE__ */ new Map();
         try {
           for (const n of api.listNotes?.(BAIBAI_SOURCE) || []) existing.set(n.id, n);
         } catch {
         }
+        // 日程/约定是完整状态集合：只有明确消失的事项才写结束标记，绝不清理消息/动态历史窗口。
+        const agendaIds = new Set(s.agenda.map((a) => "agenda:" + a.id));
+        const promiseIds = new Set(s.memories.filter((m) => m.kind === "promise" && !m.bb).map((m) => "promise:" + m.id));
+        for (const prev of existing.values()) {
+          const missing = prev.kind === "phone_agenda" && prev.id.startsWith("agenda:") && !agendaIds.has(prev.id)
+            || prev.kind === "phone_promise" && prev.id.startsWith("promise:") && !promiseIds.has(prev.id);
+          if (missing && prev.pinned) rows.push({ id: prev.id, kind: prev.kind, title: "已移除事项", text: "（手机中已移除，不再是有效约定）" + text(prev.text, 350), floor: prev.floor, pinned: false });
+        }
         const fresh = rows.filter((r) => {
           const prev = existing.get(r.id);
-          return !prev || prev.text !== r.text || (prev.title || "") !== (r.title || "");
+          return !prev || prev.text !== r.text || (prev.title || "") !== (r.title || "") || !!prev.pinned !== !!r.pinned;
         }).map((r) => {
           const prev = existing.get(r.id);
           return prev && Number.isInteger(prev.floor) ? { ...r, floor: prev.floor } : r;
         });
         if (!fresh.length) { this.lastSig = sig; return { added: 0, updated: 0, total: existing.size }; }
         const r = await api.pushNotes(BAIBAI_SOURCE, fresh);
+        if (this.eng.repo.data !== s || this.eng.repo.snapshot !== snap || !baibaiPrefs().push) return r;
         this.lastSig = sig;
         this.last = { at: Date.now(), ok: true, message: "", added: Number(r?.added) || 0, updated: Number(r?.updated) || 0 };
         baibaiInvalidate();

@@ -1,3 +1,4 @@
+import { captureSession, sessionCurrent } from '@/st/session';
 import { apiSettings, currentCharKey } from '@/api/settings';
 import { getContext, type STMessage } from '@/st/context';
 import { reactive } from 'vue';
@@ -115,9 +116,10 @@ export function scheduleLeafFlush(): void {
   const ctx = getContext();
   if (!ctx?.saveChat) return;
   if (flushTimer) clearTimeout(flushTimer);
+  const session = captureSession();
   flushTimer = setTimeout(() => {
     flushTimer = null;
-    void ctx.saveChat();
+    if (sessionCurrent(session)) void ctx.saveChat();
   }, 1500);
 }
 

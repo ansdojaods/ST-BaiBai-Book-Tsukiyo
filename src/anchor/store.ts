@@ -11,7 +11,8 @@
 import { reactive } from 'vue';
 import { getContext } from '@/st/context';
 import { apiSettings } from '@/api/settings';
-import { ANCHOR_INJECT_HEAD, ANCHOR_INJECT_TAIL } from './prompts';
+import { identifyMessage } from '@/st/session';
+import { ANCHOR_INJECT_HEAD, ANCHOR_INJECT_TAIL, RE_ANCHOR_BLOCK } from './prompts';
 
 export const ANCHOR_META_KEY = 'baibai_book_anchor';
 const STORE_VERSION = 1;
@@ -35,6 +36,7 @@ export interface AnchorEntry {
   excluded: boolean;
   /** 用户备注 */
   note?: string;
+  origin?: { messageId: string; swipe: number; block: string };
 }
 
 interface AnchorStoreData {
@@ -67,6 +69,7 @@ function sanitizeEntry(raw: unknown): AnchorEntry | null {
     version: typeof r.version === 'number' && Number.isFinite(r.version) ? Math.floor(r.version) : 1,
     source: r.source === 'api' || r.source === 'manual' ? r.source : 'chat',
     excluded: !!r.excluded,
+    origin: r.origin && typeof r.origin === 'object' && typeof (r.origin as AnchorEntry['origin'])?.messageId === 'string' ? r.origin as AnchorEntry['origin'] : undefined,
     note: typeof r.note === 'string' && r.note ? r.note : undefined,
   };
 }
@@ -99,9 +102,21 @@ export function saveAnchors(): void {
 export function currentAnchor(): AnchorEntry | null {
   for (let i = anchorState.anchors.length - 1; i >= 0; i--) {
     const a = anchorState.anchors[i];
-    if (!a.excluded) return a;
+    if (!a.excluded && anchorSourceCurrent(a)) return a;
   }
   return null;
+}
+
+/** 正文来源只在原消息的原 swipe、原锚点块仍存在时生效；版本保留供回看。 */
+export function anchorSourceCurrent(a: AnchorEntry): boolean {
+  if (a.source !== 'chat') return true;
+  const chat = getContext()?.chat ?? [];
+  const candidates = chat.filter(m => a.origin ? m.extra?.bbs_message_id === a.origin.messageId : (m.extra?.bbs_anchor as { id?: string } | undefined)?.id === a.id);
+  if (candidates.length !== 1) return false;
+  const m = candidates[0];
+  if (m.is_user || (a.origin && (m.swipe_id ?? 0) !== a.origin.swipe)) return false;
+  const matches = [...String(m.mes ?? '').matchAll(new RegExp(RE_ANCHOR_BLOCK.source, 'gi'))];
+  return (matches.at(-1)?.[1] ?? '').trim() === (a.origin?.block ?? a.text);
 }
 
 export function nextVersion(): number {
@@ -122,6 +137,11 @@ export function addAnchor(text: string, floor: number, source: AnchorSource, not
     excluded: false,
     note,
   };
+  const msg = getContext()?.chat?.[floor];
+  if (source === 'chat' && msg) {
+    const identity = identifyMessage(msg);
+    entry.origin = { messageId: identity.id, swipe: identity.swipe, block: text.trim() };
+  }
   anchorState.anchors.push(entry);
   trimVersions();
   saveAnchors();

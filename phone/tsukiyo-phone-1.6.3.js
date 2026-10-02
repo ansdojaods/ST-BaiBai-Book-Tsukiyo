@@ -1,4 +1,4 @@
-/* 月夜来信 · 小手机 v1.6.2（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · 日期/时间字段可直接手输 · 剧情日期/时刻/地点识别增强：支持 世界/环境/场景/scene 等结构与角色卡开场预设 · 每个 API 方案独立的自定义测活按钮与专属测试用语 · 测活结果留存 · 多卡通用版：联系人/地点可由角色卡预置 · 批量测活 / 私聊连发 / 按回复数主动来信 / 跨设备同步 / 自定义提示词 / 正文剧情规划条） · 无字体阴影 / 剧情规划按回复间隔推进 / 月历与整月节日 / 相册网址图片 · 联系人导入与管理 / 记忆世界书双向同步 / 多人生成 / 模块开关 / 点线面剧情规划 / 手机与 iPad 适配 · 原创实现 · 不含用户 API 密钥或聊天存档 */
+/* 月夜来信 · 小手机 v1.6.3（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · 日期/时间字段可直接手输 · 剧情日期/时刻/地点识别增强：支持 世界/环境/场景/scene 等结构与角色卡开场预设 · 每个 API 方案独立的自定义测活按钮与专属测试用语 · 测活结果留存 · 多卡通用版：联系人/地点可由角色卡预置 · 批量测活 / 私聊连发 / 按回复数主动来信 / 跨设备同步 / 自定义提示词 / 正文剧情规划条） · 无字体阴影 / 剧情规划按回复间隔推进 / 月历与整月节日 / 相册网址图片 · 联系人导入与管理 / 记忆世界书双向同步 / 多人生成 / 模块开关 / 点线面剧情规划 / 手机与 iPad 适配 · 原创实现 · 不含用户 API 密钥或聊天存档 */
 var TSUKIYO_PRESET = /*@@PRESET@@*/null/*@@END@@*/;
 var TsukiyoPhoneBundle = (() => {
   var PRESET = typeof TSUKIYO_PRESET === "object" && TSUKIYO_PRESET && Array.isArray(TSUKIYO_PRESET.contacts) ? TSUKIYO_PRESET : null;
@@ -31,7 +31,7 @@ var TsukiyoPhoneBundle = (() => {
   });
 
   // package.json
-  var package_default = { name: "tsukiyo-phone", version: "1.6.2", description: "月夜来信 · 独立实现的酒馆拟真社交与生活手机（酒馆助手脚本）" };
+  var package_default = { name: "tsukiyo-phone", version: "1.6.3", description: "月夜来信 · 独立实现的酒馆拟真社交与生活手机（酒馆助手脚本）" };
 
   // src/core/utils.js
   var VERSION = package_default.version;
@@ -866,15 +866,21 @@ var TsukiyoPhoneBundle = (() => {
         if (!body) continue;
         rows.push({ id: "msg:" + m.id, kind: "phone_chat", title: scope + " · " + name(m.author), text: name(m.author) + "→" + to + "：" + body + (m.role === "character" && !m.read ? "（玩家尚未读）" : ""), time: text(m.story, 60) || void 0, floor });
       }
-      for (const a of s.agenda.filter((x) => ["proposed", "confirmed"].includes(x.status)).slice(-10)) {
+      for (const a of s.agenda) {
+        const active = ["proposed", "confirmed"].includes(a.status);
+        const status = ({ proposed: "待确认", confirmed: "已确认", cancelled: "已取消", canceled: "已取消", done: "已完成", completed: "已完成", declined: "已拒绝", expired: "已过期" })[a.status] || "已结束";
         const when = a.date ? text(a.date, 10) + (a.time ? " " + text(a.time, 5) : "") : "";
-        rows.push({ id: "agenda:" + a.id, kind: "phone_agenda", title: "手机约定 · " + (a.status === "confirmed" ? "已确认" : "待确认"), text: text(a.title, 160) + "（" + (a.status === "confirmed" ? "已确认" : "待确认") + "）" + (when ? " · " + when : "") + " · 参与：" + (a.members || []).map(name).join("、") + (a.note ? " · " + text(a.note, 120) : ""), time: when || void 0, floor, pinned: true });
+        rows.push({ id: "agenda:" + a.id, kind: "phone_agenda", title: "手机约定 · " + status, text: text(a.title, 160) + "（" + status + "）" + (when ? " · " + when : "") + " · 参与：" + (a.members || []).map(name).join("、") + (a.note ? " · " + text(a.note, 120) : ""), time: when || void 0, floor, pinned: active });
       }
       for (const p of s.feed.slice(-3)) {
         const body = text(p.text, 240);
         if (body) rows.push({ id: "feed:" + p.id, kind: "phone_moment", title: "动态 · " + name(p.author), text: name(p.author) + " 发了动态：" + body, floor });
       }
-      for (const m of s.memories.filter((x) => x.kind === "promise" && !x.resolved && x.enabled !== false && !x.bb).slice(-6)) rows.push({ id: "promise:" + m.id, kind: "phone_promise", title: "未完约定", text: text(m.text, 300) + "（知情：" + m.audience.map(name).join("、") + "）", floor, pinned: true });
+      for (const m of s.memories.filter((x) => x.kind === "promise" && !x.bb)) {
+        const active = !m.resolved && m.enabled !== false;
+        const status = m.enabled === false ? "已停用" : m.resolved ? "已完成" : "未完约定";
+        rows.push({ id: "promise:" + m.id, kind: "phone_promise", title: status, text: "（" + status + "）" + text(m.text, 300) + "（知情：" + m.audience.map(name).join("、") + "）", floor, pinned: active });
+      }
       return rows;
     }
     async push({ force = false } = {}) {
@@ -884,22 +890,31 @@ var TsukiyoPhoneBundle = (() => {
       this.busy = true;
       try {
         const rows = this.notes(s, snap);
-        const sig = fingerprint(rows.map((r) => [r.id, r.text]));
+        const sig = fingerprint([snap.owner || "", rows.map((r) => [r.id, r.title, r.text, !!r.pinned])]);
         if (!force && sig === this.lastSig) return null;
         const existing = /* @__PURE__ */ new Map();
         try {
           for (const n of api.listNotes?.(BAIBAI_SOURCE) || []) existing.set(n.id, n);
         } catch {
         }
+        // 日程/约定是完整状态集合：只有明确消失的事项才写结束标记，绝不清理消息/动态历史窗口。
+        const agendaIds = new Set(s.agenda.map((a) => "agenda:" + a.id));
+        const promiseIds = new Set(s.memories.filter((m) => m.kind === "promise" && !m.bb).map((m) => "promise:" + m.id));
+        for (const prev of existing.values()) {
+          const missing = prev.kind === "phone_agenda" && prev.id.startsWith("agenda:") && !agendaIds.has(prev.id)
+            || prev.kind === "phone_promise" && prev.id.startsWith("promise:") && !promiseIds.has(prev.id);
+          if (missing && prev.pinned) rows.push({ id: prev.id, kind: prev.kind, title: "已移除事项", text: "（手机中已移除，不再是有效约定）" + text(prev.text, 350), floor: prev.floor, pinned: false });
+        }
         const fresh = rows.filter((r) => {
           const prev = existing.get(r.id);
-          return !prev || prev.text !== r.text || (prev.title || "") !== (r.title || "");
+          return !prev || prev.text !== r.text || (prev.title || "") !== (r.title || "") || !!prev.pinned !== !!r.pinned;
         }).map((r) => {
           const prev = existing.get(r.id);
           return prev && Number.isInteger(prev.floor) ? { ...r, floor: prev.floor } : r;
         });
         if (!fresh.length) { this.lastSig = sig; return { added: 0, updated: 0, total: existing.size }; }
         const r = await api.pushNotes(BAIBAI_SOURCE, fresh);
+        if (this.eng.repo.data !== s || this.eng.repo.snapshot !== snap || !baibaiPrefs().push) return r;
         this.lastSig = sig;
         this.last = { at: Date.now(), ok: true, message: "", added: Number(r?.added) || 0, updated: Number(r?.updated) || 0 };
         baibaiInvalidate();
