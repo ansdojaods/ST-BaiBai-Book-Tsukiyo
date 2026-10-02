@@ -1,3 +1,5 @@
+> 小手机独立镜像仓库：https://github.com/ansdojaods/tsukiyo-phone
+
 # 月夜来信小手机1.6.3 · 可选实时柏宝书记忆
 
 ## 安装
