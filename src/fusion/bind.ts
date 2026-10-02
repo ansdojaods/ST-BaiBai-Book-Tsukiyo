@@ -28,5 +28,5 @@ export function bindFusion(): void {
   bindAnchor();
   bindBackendSync();
   bindPhoneBridge();
-  console.log('[柏宝书-月夜来信版] 锚点日记 / 备份恢复 / 小手机联动 已绑定');
+  console.log('[百宝月夜书] 锚点日记 / 备份恢复 / 小手机联动 已绑定');
 }

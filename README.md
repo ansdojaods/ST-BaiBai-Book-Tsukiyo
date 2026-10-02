@@ -1,6 +1,6 @@
-# 柏宝书-月夜来信版(v1.3.1)
+# 百宝月夜书(v1.3.2)
 
-> 基于 [柏柏的 ST-BaiBai-Book v1.2.9](https://github.com/baibai-git/ST-BaiBai-Book) 的非官方分支(原名「融合版」,现更名为「柏宝书-月夜来信版」,仓库 / 文件夹名 `ST-BaiBai-Book-Tsukiyo`)。**仍是纯前端 UI 扩展**,安装方式与原版相同(扩展 → 安装扩展 → 填本仓库地址)。
+> 基于 [柏柏的 ST-BaiBai-Book v1.2.9](https://github.com/baibai-git/ST-BaiBai-Book) 的非官方分支(原名「融合版」,曾名「柏宝书-月夜来信版」,现更名为「百宝月夜书」,仓库 / 文件夹名 `ST-BaiBai-Book-Tsukiyo`)。**仍是纯前端 UI 扩展**,安装方式与原版相同(扩展 → 安装扩展 → 填本仓库地址 `https://github.com/ansdojaods/ST-BaiBai-Book-Tsukiyo`)。
 > 新增:锚点日记(手动挡记忆)、白鸟数据可选后端备份 / 恢复点 / 回收站 / 诊断导出、API 渠道测活留痕,以及与「月夜来信小手机」的双向联动。
 
 | 新增 | 在哪 | 说明文档 |
@@ -9,8 +9,9 @@
 | 备份与恢复:本地恢复点(默认 3 个)、回收站、可选的白鸟数据服务端快照(乐观并发)、诊断包 | 「联动」页 → 数据后端 | [docs/FUSION.md §3](docs/FUSION.md) |
 | 渠道测活:每渠道自定义测活短语、结果留存、一键全部测活、从小手机导入 API 方案 | 设置页 / 「联动」页 | [docs/FUSION.md §4](docs/FUSION.md) |
 | 小手机联动:`window.STBaiBaiBook.phone` 简报 / 外部记录 / 借用渠道;手机 1.6.1 补丁与导入 JSON | 「联动」页 → 小手机联动;`phone/` | [docs/PHONE_BRIDGE.md](docs/PHONE_BRIDGE.md) · [phone/README.md](phone/README.md) |
+| 摘要失败不拦截正文(1.3.2):前面楼层漏摘时默认照常生成,只等上一楼摘要最多 20 秒,缺口后台逐楼追补;原版「拦截并插提示楼」改为可选 | 设置页 → 摘要设置 → 摘要缺口时 | [docs/FUSION.md §6.1](docs/FUSION.md) |
 
-快速开始:`npm install && npm test && npm run build`(`dist/` 已随仓库提交,可直接安装)。发布到自己的仓库前请改 `src/memory/update.ts` 的 `REMOTE_MANIFEST_URL` 与 `manifest.json` 的 `homePage`。
+快速开始:`npm install && npm test && npm run build`(`dist/` 已随仓库提交,可直接安装)。仓库地址已配置:`REMOTE_MANIFEST_URL` 与 `homePage` 已指向 `ansdojaods/ST-BaiBai-Book-Tsukiyo`,迁移仓库时需同步修改并重新构建。
 
 **授权说明**:原版 ST-BaiBai-Book 未附带开源许可证,本分支仅供个人使用与向原作者提交合并请求参考;「柏宝书」名称与原版代码版权归柏柏所有;锚点日记为概念重写(原插件 AnchorNote 作者要求二改请先告知);世界背面(world-backstage)为保留所有权利的项目,本分支**未使用**其任何源码、提示词或文案,只独立实现了公开描述过的思路。
 

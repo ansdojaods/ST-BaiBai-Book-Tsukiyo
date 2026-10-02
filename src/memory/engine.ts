@@ -527,14 +527,48 @@ export function openingPendingFloor(chat: STMessage[]): number {
   return lastAi;
 }
 
+/** pass 模式的「缺口放行」提示节流:同一缺口数 60 秒内只提示一次,连发消息不刷屏。 */
+let lastBacklogNotice = { count: 0, at: 0 };
+function notifyBacklogPassThrough(count: number, stillRunning: boolean): void {
+  const now = Date.now();
+  if (lastBacklogNotice.count === count && now - lastBacklogNotice.at < 60_000) return;
+  lastBacklogNotice = { count, at: now };
+  const tail = stillRunning
+    ? '上一楼摘要仍在后台进行,完成后自动落盘'
+    : apiSettings.backlogCatchUp
+      ? '后台会逐楼追补;也可到摘要页手动/批量补摘'
+      : '请到摘要页手动/批量补摘';
+  toast(`有 ${count} 楼尚未摘要,本次正文照常生成;${tail}`, 'warning');
+}
+
 /**
- * 生成拦截器:每次「产出新正文」的生成前,守住不变式「除最后一条 AI 外其余都必须有摘要」。
+ * 「最多等 ms 毫秒」:摘要 promise 先完成就立刻返回 true;超时返回 false(摘要继续在后台跑,不取消)。
+ * ms<=0 直接返回 false(不等)。promise 永不 reject(runSummary 保证),这里不再 catch。
+ */
+async function waitBounded(p: Promise<void>, ms: number): Promise<boolean> {
+  if (ms <= 0) return false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<false>(resolve => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([p.then(() => true as const), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * 生成拦截器:每次「产出新正文」的生成前,照看不变式「除最后一条 AI 外其余都必须有摘要」。
  * 判据 = holesExceptLast(末尾 AI 之前的待摘楼层),按数量分流:
  *  - 0 个 → 放行。
  *  - 恰好 1 个 → 等待正在后台生成的摘要;若事件时序未启动它,拦截器自行补这一楼。
- *    完成后重判,洞填上则启动最新稳定楼摘要;确认摘要请求已发起后放行,否则拦截。
- *  - >1 个 → 直接拦截,且不启动新的自动补摘;由用户自行选择逐楼补摘或批量补摘。
- * 拦截 = abort(true) + /sendas 插提示楼。
+ *    完成后重判,洞填上则启动最新稳定楼摘要;确认摘要请求已发起后放行。
+ *  - 仍有洞(>1,或那唯一的洞补失败/没等到)→ 看 apiSettings.backlogPolicy:
+ *      · 'pass'(月夜版默认):**照常放行,绝不中止正文**。只 toast 提示缺口数;若 backlogCatchUp 开着且
+ *        引擎空闲,后台追补最旧的一个洞(不等待、每次生成最多一楼)。等待上一楼摘要也有上限
+ *        backlogWaitSec 秒,API 卡死/反复失败时不会把玩家晾在那里。
+ *      · 'block'(原版):abort(true) + /sendas 插「积压提示楼」,由用户逐楼/批量补摘后删楼继续。
  *
  * 关键时序/口径(改前务必理解,否则极易复发并行 bug):
  *  1) type 口径必须与摘要触发(bindEngine 里 GENERATION_STARTED 监听器)一致——都放行
@@ -543,6 +577,8 @@ export function openingPendingFloor(chat: STMessage[]): number {
  *     到 runSummary 之间是同步代码、runSummary 同步置好 currentRun → 本拦截器跑时已能读到「在飞」信号。
  *  3) ST 会 await 本拦截器(script.js runGenerationInterceptors),故 await 能真正阻塞生成;
  *     且拦截器在 prompt 组装之前跑,摘要落盘后,后续组装阶段的注入自然带上新数据。
+ *  4) pass 模式放行时若摘要仍在飞,它与正文生成并行——这与原版「等请求发起即放行」的常态一致
+ *     (busy 锁保证同一时刻只有一个摘要在跑);洞楼正文仍留在上下文里(未摘的楼不会被隐藏),剧情不丢。
  * 跟随「自动摘要」开关:关了则一并不拦。
  */
 export async function handleGenerationIntercept(
@@ -551,7 +587,7 @@ export async function handleGenerationIntercept(
 ): Promise<boolean> {
   if (!engineActiveHere()) return false; // 排除角色/总开关关:不拦
   if (!apiSettings.autoSummaryEnabled) return false; // 自动摘要关 → 拦截一并关
-  // 要产出新正文的生成才拦:normal(发消息)/regenerate(重新生成)/swipe(翻页)。
+  // 要产出新正文的生成才管:normal(发消息)/regenerate(重新生成)/swipe(翻页)。
   // 与摘要触发(GENERATION_STARTED 监听器)同口径,否则重生/翻页时「补摘」与「生成」会并行。
   // continue(续写)/quiet(安静)/impersonate(扮演)放行,不该被洞挡。
   if (type === 'continue' || type === 'quiet' || type === 'impersonate') return false;
@@ -562,6 +598,16 @@ export async function handleGenerationIntercept(
   const chat = ctx.chat ?? [];
   normalizeBacklogNotices(chat); // 兼容升级前已存在但尚未标记的提示楼
   const skipLastAi = shouldSkipLastAiForGeneration(chat, type);
+  const blocking = apiSettings.backlogPolicy === 'block';
+  const waitMs = Math.max(0, apiSettings.backlogWaitSec | 0) * 1000;
+  // 等一个摘要:block 模式等到完成(promise 永不 reject);pass 模式最多等 waitMs。返回「是否已完成」。
+  const waitSummary = async (p: Promise<void>): Promise<boolean> => {
+    if (blocking) {
+      await p;
+      return true;
+    }
+    return waitBounded(p, waitMs);
+  };
 
   // 开场白特判(不拦,只等):开场白无时间标签、又还没摘时,先摘它建立时间锚点,再放行首次生成。
   // 否则主模型与开场白摘要会各自凭空编一个开场时间,导致正文与摘要时间对不上(用户实测)。
@@ -572,10 +618,10 @@ export async function handleGenerationIntercept(
     const inflight = currentSummaryPromise();
     if (inflight) {
       toast('正在为开场白建立时间锚点,请稍候…', 'info');
-      await inflight; // promise 永不 reject,不会卡死生成
+      await waitSummary(inflight);
     } else if (!busy) {
       toast('正在为开场白建立时间锚点,请稍候…', 'info');
-      await runSummary(opening);
+      await waitSummary(runSummary(opening));
     }
     // 摘要落盘后 refreshInjection 已把「当前时间」刷成开场白时间;继续走洞判定(通常放行)。
   }
@@ -589,14 +635,17 @@ export async function handleGenerationIntercept(
   }
 
   // 恰好 1 个洞:优先等后台任务;若事件时序未启动且引擎空闲,拦截器自行补。
+  let attempted = false; // 本轮已为这个洞发过/等过一次摘要(失败后不要紧接着再追补同一楼)
+  let stillRunning = false; // pass 模式超时放行时,摘要仍在后台跑
   if (holes.length === 1) {
     const inflight = currentSummaryPromise();
-    if (inflight) {
+    let run: Promise<void> | null = null;
+    if (inflight) run = inflight;
+    else if (!busy) run = runSummary(holes[0]);
+    if (run) {
+      attempted = true;
       toast('正在补摘前一楼层,请稍候…', 'info');
-      await inflight;
-    } else if (!busy) {
-      toast('正在补摘前一楼层,请稍候…', 'info');
-      await runSummary(holes[0]);
+      stillRunning = !(await waitSummary(run));
     }
     holes = holesExceptLast(chat);
     if (holes.length < 1) {
@@ -607,7 +656,23 @@ export async function handleGenerationIntercept(
     }
   }
 
-  abort(true); // 仍有洞(>1,或那唯一的洞没在飞/补失败):立即中止
+  if (!blocking) {
+    // —— pass:照常生成,绝不 abort、不插提示楼 ——
+    console.log('[柏宝书] 摘要缺口', holes, '→ 不拦截正文(backlogPolicy=pass)', { attempted, stillRunning });
+    notifyBacklogPassThrough(holes.length, stillRunning);
+    if (apiSettings.backlogCatchUp && !attempted && !busy && !currentSummaryPromise()) {
+      // 后台追补最旧的一个洞(多洞时 maybeSummarizePrevAi 会主动停手,所以由这里兜一楼);不等待。
+      const target = holes[0];
+      void runSummary(target)
+        .then(() => afterSummaryHideAndInject(chat))
+        .catch(e => {
+          engineState.lastError = e instanceof Error ? e.message : String(e);
+        });
+    }
+    return false;
+  }
+
+  abort(true); // block 模式:仍有洞(>1,或那唯一的洞没在飞/补失败)→ 立即中止
 
   // 去重:末楼已是本提示楼就不再重复插(连点发送不刷屏)
   const last = chat[chat.length - 1];
@@ -623,7 +688,8 @@ export async function handleGenerationIntercept(
       `发生了什么: 因为前面有楼层没有摘要，为了保证剧情的连续性，所以你需要先去给它补全摘要才能继续发送消息`,
       `应该怎么做: 点开左下角魔法棒，打开柏宝书界面，在第一页的“未摘要楼层”中逐楼补摘，或使用“批量补摘”一次处理`,
       `补全失败: 多半是API问题，多尝试不同的API`,
-      `补全成功: 在补全成功后，只需要把这一层提示楼层删掉，就可以继续正常生成了`
+      `补全成功: 在补全成功后，只需要把这一层提示楼层删掉，就可以继续正常生成了`,
+      `不想被拦: 设置页「摘要设置 → 摘要缺口时」改为“照常生成”，之后摘要失败也不会再拦截正文`
     ].join('{{newline}}');
     try {
       await exec(`/sendas name="柏宝书" ${text}`);

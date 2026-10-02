@@ -27,7 +27,7 @@ function buildButton(): HTMLElement {
   btn.className = 'drawer';
   btn.innerHTML = `
     <div class="drawer-toggle">
-      <div class="drawer-icon fa-solid fa-book-bookmark fa-fw closedIcon" title="柏宝书-月夜来信版"></div>
+      <div class="drawer-icon fa-solid fa-book-bookmark fa-fw closedIcon" title="百宝月夜书"></div>
     </div>
   `;
   // 仅打开窗口,不走 ST 的抽屉开合逻辑(故未挂 .drawer-toggle 的 doNavbarIconClick)

@@ -20,7 +20,7 @@ def rep(old, new, count=1):
 
 # 0. banner + version
 rep('/* 月夜来信 · 小手机 v1.5.2（',
-    '/* 月夜来信 · 小手机 v1.6.1（柏宝书-月夜来信版联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · ')
+    '/* 月夜来信 · 小手机 v1.6.1（百宝月夜书联动：自动读取柏宝书的剧情时间/地点/在场人物作回退、柏宝书分层摘要·锚点日记·未了结计划进入手机人物与规划上下文、手机交流/约定/动态回写柏宝书【小手机】记录、一键导入柏宝书记忆与副 API 方案、经柏宝书测活渠道（密钥不经手机） · ')
 rep('var package_default = { name: "tsukiyo-phone", version: "1.5.2",',
     'var package_default = { name: "tsukiyo-phone", version: "' + NEW_VERSION + '",')
 
@@ -76,7 +76,7 @@ rep('${button("导入方案", "import-api")}', '${button("导入方案", "import
 rep('    const s = ui.data, c = ui.engine.settings.data, bridge = ui.engine.bridge;\n    return `<div class="pad"><div class="card"><div style="display:flex;align-items:center;gap:12px"><span class="avatar sage">${icon("moon", 23)}</span>',
     '    const s = ui.data, c = ui.engine.settings.data, bridge = ui.engine.bridge, bb = ui.engine.baibai ? ui.engine.baibai.status() : null;\n    return `<div class="pad"><div class="card"><div style="display:flex;align-items:center;gap:12px"><span class="avatar sage">${icon("moon", 23)}</span>')
 card = ('<div class="card"><h3 style="margin:0 0 6px">柏宝书联动</h3><p class="tiny muted">${e(bb ? bb.text : "不可用")}</p>'
-        '${switchRow("启用柏宝书联动", "检测到「柏宝书-月夜来信版」(≥1.3.0) 时双向联动；关闭后手机完全独立运行", "baibai-enabled", !!bb?.prefs.enabled)}'
+        '${switchRow("启用柏宝书联动", "检测到「百宝月夜书」(≥1.3.0) 时双向联动；关闭后手机完全独立运行", "baibai-enabled", !!bb?.prefs.enabled)}'
         '${switchRow("剧情简报进入手机上下文", "主线变量缺失时用柏宝书的剧情时间/地点兜底；人物生成与规划可参考柏宝书分层摘要、锚点日记、未了结计划、NPC 档案（只给在场或被允许读正文的人物看摘要）", "baibai-brief", !!bb?.prefs.brief)}'
         '${switchRow("在场人物兜底", "主线变量没有“当前互动NPC”时，采用柏宝书推断的在场人物", "baibai-present", !!bb?.prefs.present)}'
         '${switchRow("手机交流回写柏宝书", "新消息、约定、动态、未完约定推送到柏宝书的【小手机】外部记录，参与其正文注入与摘要；不会改动柏宝书自身的记忆", "baibai-push", !!bb?.prefs.push)}'

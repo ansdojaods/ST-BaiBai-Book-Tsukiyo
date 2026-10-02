@@ -157,6 +157,138 @@ describe('opening generation interception', () => {
   });
 });
 
+describe('backlog policy (月夜版: summary failure never blocks generation)', () => {
+  let savedPolicy: settings.BacklogPolicy;
+  let savedWait: number;
+  let savedCatchUp: boolean;
+
+  beforeEach(() => {
+    savedPolicy = settings.apiSettings.backlogPolicy;
+    savedWait = settings.apiSettings.backlogWaitSec;
+    savedCatchUp = settings.apiSettings.backlogCatchUp;
+    settings.apiSettings.backlogPolicy = 'pass';
+    settings.apiSettings.backlogWaitSec = 20;
+    settings.apiSettings.backlogCatchUp = true;
+  });
+
+  afterEach(() => {
+    settings.apiSettings.backlogPolicy = savedPolicy;
+    settings.apiSettings.backlogWaitSec = savedWait;
+    settings.apiSettings.backlogCatchUp = savedCatchUp;
+  });
+
+  /** user, ai(洞), user, ai(洞), user, ai(末尾豁免), user → holesExceptLast = [1, 3] */
+  const twoHoleChat = () => [message(true), message(), message(true), message(), message(true), message(), message(true)];
+  /** user, ai(洞), user, ai(末尾豁免), user → holesExceptLast = [1] */
+  const oneHoleChat = () => [message(true), message(), message(true), message(), message(true)];
+
+  it('defaults to pass: never aborts, inserts no notice floor, catches up one hole in background', async () => {
+    expect(settings.defaults().backlogPolicy).toBe('pass');
+    const chat = twoHoleChat();
+    const exec = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(context, 'getContext').mockReturnValue({
+      chat,
+      name1: 'User',
+      name2: 'Character',
+      getCurrentChatId: () => 'backlog-pass',
+      executeSlashCommandsWithOptions: exec,
+    } as unknown as STContext);
+    const abort = vi.fn();
+
+    expect(await handleGenerationIntercept('normal', abort)).toBe(false);
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+    expect(notices.toast).toHaveBeenCalledWith(expect.stringContaining('有 2 楼尚未摘要'), 'warning');
+    // 后台追补最旧的一个洞(不等待),完成后落盘
+    await currentSummaryPromise();
+    expect(client.requestViaMainApi).toHaveBeenCalledOnce();
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+    expect(chat[3].extra?.bbs_leaf).toBeUndefined();
+  });
+
+  it('lets generation proceed when the single-hole summary fails, without an immediate re-attempt', async () => {
+    vi.mocked(client.requestViaMainApi).mockRejectedValue(new Error('api down'));
+    const chat = oneHoleChat();
+    useChat(chat);
+    const abort = vi.fn();
+
+    expect(await handleGenerationIntercept('normal', abort)).toBe(false);
+
+    expect(abort).not.toHaveBeenCalled();
+    // 首试 + summaryMaxRetries(默认 1)次重试 = 2 次;失败后本轮不再紧接着追补同一楼
+    expect(client.requestViaMainApi).toHaveBeenCalledTimes(1 + settings.apiSettings.summaryMaxRetries);
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+    expect(notices.toast).toHaveBeenCalledWith('正在补摘前一楼层,请稍候…', 'info');
+    expect(notices.toast).toHaveBeenCalledWith(expect.stringContaining('有 1 楼尚未摘要'), 'warning');
+  });
+
+  it('stops waiting after backlogWaitSec and lets the summary finish in the background', async () => {
+    let resolveApi: (raw: string) => void = () => {};
+    vi.mocked(client.requestViaMainApi).mockReturnValue(new Promise<string>(r => { resolveApi = r; }));
+    const chat = oneHoleChat();
+    useChat(chat);
+    const abort = vi.fn();
+
+    const pending = handleGenerationIntercept('normal', abort);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await pending).toBe(false);
+    expect(abort).not.toHaveBeenCalled();
+    expect(chat[1].extra?.bbs_leaf).toBeUndefined();
+
+    resolveApi(JSON.stringify(summary));
+    await currentSummaryPromise();
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+  });
+
+  it('does not wait at all when backlogWaitSec is 0', async () => {
+    settings.apiSettings.backlogWaitSec = 0;
+    let resolveApi: (raw: string) => void = () => {};
+    vi.mocked(client.requestViaMainApi).mockReturnValue(new Promise<string>(r => { resolveApi = r; }));
+    const chat = oneHoleChat();
+    useChat(chat);
+
+    expect(await handleGenerationIntercept('normal', vi.fn())).toBe(false);
+
+    resolveApi(JSON.stringify(summary));
+    await currentSummaryPromise();
+    expect(chat[1].extra?.bbs_leaf?.text).toBe(summary.summary);
+  });
+
+  it('keeps the legacy behaviour when backlogPolicy is block', async () => {
+    settings.apiSettings.backlogPolicy = 'block';
+    const chat = twoHoleChat();
+    const exec = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(context, 'getContext').mockReturnValue({
+      chat,
+      name1: 'User',
+      name2: 'Character',
+      getCurrentChatId: () => 'backlog-block',
+      executeSlashCommandsWithOptions: exec,
+    } as unknown as STContext);
+    const abort = vi.fn();
+
+    expect(await handleGenerationIntercept('normal', abort)).toBe(true);
+
+    expect(abort).toHaveBeenCalledWith(true);
+    expect(exec).toHaveBeenCalledOnce();
+    expect(String(exec.mock.calls[0][0])).toContain('/sendas name="柏宝书"');
+    expect(client.requestViaMainApi).not.toHaveBeenCalled();
+  });
+
+  it('normalizes unknown policies to pass and clamps the wait window', () => {
+    const n = settings.normalize({ backlogPolicy: 'nope', backlogWaitSec: 9999, backlogCatchUp: 'x' } as unknown as Partial<settings.ApiSettings>);
+    expect(n.backlogPolicy).toBe('pass');
+    expect(n.backlogWaitSec).toBe(600);
+    expect(n.backlogCatchUp).toBe(true);
+    expect(settings.normalize({ backlogPolicy: 'block', backlogWaitSec: -3, backlogCatchUp: false } as Partial<settings.ApiSettings>)).toMatchObject({
+      backlogPolicy: 'block',
+      backlogWaitSec: 20,
+      backlogCatchUp: false,
+    });
+  });
+});
+
 describe('summary request roles', () => {
   const originalPrompts = { ...settings.apiSettings.prompts };
   const originalBatch = {

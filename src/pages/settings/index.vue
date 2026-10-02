@@ -5,7 +5,7 @@ import BbsSelect from '@/components/BbsSelect.vue';
 import Icon from '@/components/Icon.vue';
 import ModalMask from '@/components/ModalMask.vue';
 import { fetchModels, testChannel } from '@/api/client';
-import { apiSettings, newChannel, resolveVectorModel, sanitizeTagName, type ApiChannel, type Verbosity } from '@/api/settings';
+import { apiSettings, newChannel, resolveVectorModel, sanitizeTagName, type ApiChannel, type BacklogPolicy, type Verbosity } from '@/api/settings';
 import { getContext } from '@/st/context';
 import {
   JAILBREAK_PROMPT,
@@ -54,6 +54,12 @@ const REASONING_EFFORT_OPTIONS = [
 const VERBOSITY_OPTIONS: { value: Verbosity; label: string }[] = [
   { value: 'detailed', label: '详细' },
   { value: 'concise', label: '精简' },
+];
+
+/** 摘要缺口策略:月夜版默认「照常生成」,原版「拦截」仅作可选 */
+const BACKLOG_OPTIONS: { value: BacklogPolicy; label: string }[] = [
+  { value: 'pass', label: '照常生成(不拦截)' },
+  { value: 'block', label: '拦截并提示补摘(原版)' },
 ];
 
 /** 任务指派下拉:空串 = 跟随主 API,其余为副渠道 id(未命名渠道给个占位名,免空白选项) */
@@ -769,7 +775,7 @@ function exportPublicApiDocument() {
     <div class="bbs-master" :class="{ 'is-off': !apiSettings.enabled }">
       <span class="bbs-master-spine" aria-hidden="true"></span>
       <div class="bbs-master-text">
-        <span class="bbs-master-title">柏宝书-月夜来信版 · 记忆引擎</span>
+        <span class="bbs-master-title">百宝月夜书 · 记忆引擎</span>
       </div>
       <button
         type="button"
@@ -960,7 +966,7 @@ function exportPublicApiDocument() {
           <span class="bbs-field-label">启用自动摘要</span>
           <input v-model="apiSettings.autoSummaryEnabled" type="checkbox" class="bbs-checkbox" />
         </label>
-        <p class="bbs-field-hint">开启后自动摘要并隐藏旧楼,同时启用正文时间标签(剧情时间锚点)与积压拦截(漏摘时拦截发送、提示补摘)。</p>
+        <p class="bbs-field-hint">开启后自动摘要并隐藏旧楼,同时启用正文时间标签(剧情时间锚点)。前面楼层漏摘时怎么办,由下方「摘要缺口时」决定(月夜版默认不拦截正文)。</p>
         <div class="bbs-num-row">
           <span class="bbs-field-label">字数档位</span>
           <BbsSelect v-model="apiSettings.verbosity" :options="VERBOSITY_OPTIONS" class="bbs-select-narrow" aria-label="字数档位" />
@@ -1001,6 +1007,21 @@ function exportPublicApiDocument() {
           <input v-model.number="apiSettings.summaryMaxRetries" class="bbs-input bbs-num" type="number" min="0" />
         </label>
         <p class="bbs-field-hint">摘要/总结请求失败(报错或返回内容无法解析)时最多额外重试几次,0 为不重试。默认 1。</p>
+        <div class="bbs-num-row">
+          <span class="bbs-field-label">摘要缺口时</span>
+          <BbsSelect v-model="apiSettings.backlogPolicy" :options="BACKLOG_OPTIONS" class="bbs-select-narrow" aria-label="摘要缺口时" />
+        </div>
+        <p class="bbs-field-hint">前面有 AI 楼没摘上(摘要失败、手动删了摘要等)时正文怎么办。<b>照常生成</b>:就算摘要失败也不拦截发送,未摘的楼层正文仍留在上下文里、剧情不断,缺口交给后台追补或手动补摘;<b>拦截</b>:原版行为,中止生成并插一楼提示,补完摘要再删楼继续。</p>
+        <label class="bbs-num-row">
+          <span class="bbs-field-label">缺口等待上限(秒)</span>
+          <input v-model.number="apiSettings.backlogWaitSec" class="bbs-input bbs-num" type="number" min="0" max="600" />
+        </label>
+        <p class="bbs-field-hint">「照常生成」模式下,发送前若上一楼摘要正在补,最多等这么多秒;等不到就先生成正文,摘要继续在后台跑完。0 为不等。默认 20。</p>
+        <label class="bbs-switch-row">
+          <span class="bbs-field-label">后台自动追补缺口</span>
+          <input v-model="apiSettings.backlogCatchUp" type="checkbox" class="bbs-checkbox" />
+        </label>
+        <p class="bbs-field-hint">「照常生成」模式下放行时,若仍有多处缺口且引擎空闲,每次生成顺手在后台补最旧的一楼(与正文并行、一次只补一楼,不会一口气刷光 API);关闭则只提示,缺口全靠手动/批量补摘。默认开。</p>
         <label class="bbs-num-row">
           <span class="bbs-field-label">批量补摘·每批字数</span>
           <input v-model.number="apiSettings.batchMaxChars" class="bbs-input bbs-num" type="number" min="500" step="500" />
@@ -1821,7 +1842,7 @@ function exportPublicApiDocument() {
             type="text"
             placeholder="留空=「回复 ok」;如:只回答你的模型名"
           />
-          <span class="bbs-field-hint">【月夜来信版】测试渠道时发送这句话;写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。上次结果:{{ editingChannel.lastTest ? `${editingChannel.lastTest.ok ? '成功' : '失败'} · ${new Date(editingChannel.lastTest.at).toLocaleString()}` : '尚未测过' }}</span>
+          <span class="bbs-field-hint">【百宝月夜书】测试渠道时发送这句话;写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。上次结果:{{ editingChannel.lastTest ? `${editingChannel.lastTest.ok ? '成功' : '失败'} · ${new Date(editingChannel.lastTest.at).toLocaleString()}` : '尚未测过' }}</span>
         </label>
         <p v-if="testing[editingChannel.id]" class="bbs-channel-test">{{ testing[editingChannel.id] }}</p>
 

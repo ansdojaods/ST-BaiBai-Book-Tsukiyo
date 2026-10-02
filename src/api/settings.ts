@@ -230,6 +230,8 @@ export interface UiPrefs {
 
 /** 字数详尽档位:detailed=详细(默认),concise=精简(摘要/总结/二次总结字数一并降低)。仅影响内置模板。 */
 export type Verbosity = 'detailed' | 'concise';
+/** 摘要缺口策略:pass=照常生成(不拦截);block=拦截并提示补摘(原版) */
+export type BacklogPolicy = 'pass' | 'block';
 
 /**
  * 注入设置:各状态块是否注入**主模型**(生成正文的请求)。
@@ -314,6 +316,17 @@ export interface ApiSettings {
   recentResolvedPlansCount: number;
   /** 摘要/总结失败(请求报错或 JSON 解析失败)的最大重试次数。0=不重试;默认 1(最多再试一次)。 */
   summaryMaxRetries: number;
+  /**
+   * 【月夜版】摘要缺口策略(前面有 AI 楼没摘上时,正文生成怎么办):
+   *  - 'pass'(默认):**从不拦截正文**。只为「正在补摘的上一楼」等 backlogWaitSec 秒,等不到/补失败照常生成,
+   *    缺口留给后台逐楼追补(backlogCatchUp)或用户手动/批量补摘。
+   *  - 'block':原版行为 —— 缺口没补上就中止生成,并插一楼「积压提示」要求先补摘。
+   */
+  backlogPolicy: BacklogPolicy;
+  /** pass 模式下,拦截器为在飞/自补的「上一楼摘要」最多等待的秒数;0=不等直接放行。默认 20,上限 600。 */
+  backlogWaitSec: number;
+  /** pass 模式下,放行时若仍有缺口且引擎空闲,后台追补**最旧的一个**缺口(每次生成最多一楼,不刷 API)。默认 true。 */
+  backlogCatchUp: boolean;
   /** 批量补摘:每批最大正文字符数(清洗后)。攒够即切块,控制单次请求规模(防 AI 注意力涣散)。 */
   batchMaxChars: number;
   /** 批量补摘:每批最大楼数兜底。即便字符没到上限,楼数到此也切块。 */
@@ -441,6 +454,9 @@ export function defaults(): ApiSettings {
     higherResummaryThreshold: 3,
     recentResolvedPlansCount: 5,
     summaryMaxRetries: 1,
+    backlogPolicy: 'pass',
+    backlogWaitSec: 20,
+    backlogCatchUp: true,
     batchMaxChars: 30000,
     batchMaxFloors: 10,
     customStripTags: [],
@@ -624,6 +640,14 @@ export function normalize(raw: unknown): ApiSettings {
     Number.isFinite(merged.summaryMaxRetries) && merged.summaryMaxRetries >= 0
       ? Math.floor(merged.summaryMaxRetries)
       : 1;
+  // 摘要缺口策略:只认 'block',其余(含旧数据缺失)一律 'pass' = 不拦截正文
+  merged.backlogPolicy = merged.backlogPolicy === 'block' ? 'block' : 'pass';
+  // 缺口等待上限:0–600 秒整数,缺失/非法回退默认 20
+  merged.backlogWaitSec =
+    Number.isFinite(merged.backlogWaitSec) && merged.backlogWaitSec >= 0
+      ? Math.min(600, Math.floor(merged.backlogWaitSec))
+      : 20;
+  merged.backlogCatchUp = typeof merged.backlogCatchUp === 'boolean' ? merged.backlogCatchUp : true;
   // 批量补摘参数:正整数,缺失/非法回退默认值(下限 1,避免 0 导致永不切块/死循环)
   merged.batchMaxChars =
     Number.isFinite(merged.batchMaxChars) && merged.batchMaxChars >= 500
@@ -768,11 +792,18 @@ function applyInto(target: ApiSettings, src: ApiSettings): void {
   target.higherResummaryThreshold = src.higherResummaryThreshold;
   target.recentResolvedPlansCount = src.recentResolvedPlansCount;
   target.summaryMaxRetries = src.summaryMaxRetries;
+  target.backlogPolicy = src.backlogPolicy;
+  target.backlogWaitSec = src.backlogWaitSec;
+  target.backlogCatchUp = src.backlogCatchUp;
   target.batchMaxChars = src.batchMaxChars;
   target.batchMaxFloors = src.batchMaxFloors;
   target.customStripTags = src.customStripTags;
   target.varsGlobalTemplate = src.varsGlobalTemplate;
   target.varsTemplateByChar = src.varsTemplateByChar;
+  // 【融合版】嵌套设置也要回灌,否则刷新页面后锚点/后端/小手机设置会退回默认
+  target.anchor = src.anchor;
+  target.backend = src.backend;
+  target.phoneBridge = src.phoneBridge;
 }
 
 function channelFingerprint(channels: ApiChannel[]): string {

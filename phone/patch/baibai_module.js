@@ -1,5 +1,5 @@
   // src/services/baibai-bridge.js
-  // 柏宝书-月夜来信版（ST-BaiBai-Book-Tsukiyo ≥1.3.0）联动：只读其公开 API，不触碰其内部数据；手机的一切改动都留在手机。
+  // 百宝月夜书（ST-BaiBai-Book-Tsukiyo ≥1.3.0）联动：只读其公开 API，不触碰其内部数据；手机的一切改动都留在手机。
   var BAIBAI_SOURCE = "tsukiyo-phone";
   var BAIBAI_EVENTS = ["st-baibai-book:phone-update", "st-baibai-book:changed", "st-baibai-book:ready"];
   var BAIBAI_BRIEF_ARGS = { historyChars: 2400, anchorChars: 1200 };
@@ -164,11 +164,11 @@
       const prefs = baibaiPrefs(), api = baibaiApi();
       if (!baibaiRuntime.enabled) return { connected: false, text: "离线演示不连接柏宝书", prefs };
       if (!prefs.enabled) return { connected: !!api, text: api ? "已检测到柏宝书，但联动已关闭" : "联动已关闭", prefs };
-      if (!api) return { connected: false, text: "未检测到柏宝书-月夜来信版（需 ≥1.3.0，并在其「联动」页开启小手机联动）", prefs };
+      if (!api) return { connected: false, text: "未检测到百宝月夜书（需 ≥1.3.0，并在其「联动」页开启小手机联动）", prefs };
       const brief = baibaiBrief();
       const parts = ["已连接"];
       if (brief) {
-        if (brief.pluginVersion) parts.push("柏宝书-月夜来信版 v" + text(brief.pluginVersion, 20));
+        if (brief.pluginVersion) parts.push("百宝月夜书 v" + text(brief.pluginVersion, 20));
         if (brief.time) parts.push(text(brief.time, 40));
         parts.push("外部记录 " + (Number(brief.externalCount) || 0) + " 条");
       } else parts.push("简报暂不可用（柏宝书可能关闭了联动）");

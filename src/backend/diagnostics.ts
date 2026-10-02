@@ -42,7 +42,7 @@ export function buildDiagnostics(pluginVersion: string): Record<string, unknown>
   for (const n of memory.summaries) levels[`L${n.level}`] = (levels[`L${n.level}`] ?? 0) + 1;
   return {
     generatedAt: new Date().toISOString(),
-    plugin: { name: 'ST-BaiBai-Book-Tsukiyo (柏宝书-月夜来信版)', version: pluginVersion },
+    plugin: { name: 'ST-BaiBai-Book-Tsukiyo (百宝月夜书)', version: pluginVersion },
     host: {
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       stReady: !!ctx,
@@ -103,6 +103,9 @@ export function buildDiagnostics(pluginVersion: string): Record<string, unknown>
       })),
       assignments: s.assignments,
       summaryMaxRetries: s.summaryMaxRetries,
+      backlogPolicy: s.backlogPolicy,
+      backlogWaitSec: s.backlogWaitSec,
+      backlogCatchUp: s.backlogCatchUp,
     },
     memorySettings: {
       enabled: s.enabled,

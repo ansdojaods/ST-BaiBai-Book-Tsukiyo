@@ -1,6 +1,6 @@
-# 柏宝书-月夜来信版(v1.3.1,原「融合版」)技术说明
+# 百宝月夜书(v1.3.2,原「融合版」/「柏宝书-月夜来信版」)技术说明
 
-> 本文说明「柏宝书-月夜来信版」(下文沿用开发期的简称「融合版」)在原版 ST-BaiBai-Book v1.2.9 之上**新增了什么、放在哪、怎么关、怎么测**。
+> 本文说明「百宝月夜书」(下文沿用开发期的简称「融合版」)在原版 ST-BaiBai-Book v1.2.9 之上**新增了什么、放在哪、怎么关、怎么测**。
 > 原版功能(自动摘要 / 台账 / 向量记忆 / 带数据新建 / 公开 API …)不在此重复,见仓库 `README.md` 与 `PUBLIC_API.md`。
 
 ## 0. 一句话
@@ -100,11 +100,29 @@ channels[i]: { ..., testPrompt?: string, lastTest?: { ok, at, message } }
 
 老数据缺这些键时 `normalize()` 逐字段回退默认,不会因升级丢设置。
 
+### 6.1 摘要缺口策略(1.3.2 起:摘要失败不拦截正文)
+
+```ts
+backlogPolicy:  'pass' | 'block'   // 默认 'pass'
+backlogWaitSec: number             // 默认 20(0–600;0=不等)
+backlogCatchUp: boolean            // 默认 true
+```
+
+原版 `handleGenerationIntercept`(`src/memory/engine.ts`)守的是不变式「除最后一条 AI 外其余 AI 楼都必须有摘要」:恰好 1 个缺口时等它补完;等完仍有缺口(补失败)或缺口 >1 时 `abort(true)` 并用 `/sendas` 插一楼「【柏宝书】积压提示」,用户补摘后删楼才能继续。
+
+1.3.2 的默认 `pass` 模式:
+- **绝不 `abort`、绝不插提示楼**。缺口楼层的正文本来就留在上下文里(只有已摘的旧楼才会被隐藏),主模型仍能看到剧情,只是该楼暂时没有结构化台账增量。
+- 仍会为「正在补的上一楼」等待,但最多 `backlogWaitSec` 秒(`block` 模式等到完成);超时先放行,摘要继续在后台跑完并落盘。开场白建立时间锚点的等待同样受此上限约束。
+- 放行时若仍有缺口:toast 一次(同一缺口数 60 秒内不重复);`backlogCatchUp` 开着且引擎空闲时,后台 `runSummary(最旧缺口)`(不等待、一次一楼;本轮刚失败的那一楼不紧接着重试,留给下一轮)。多缺口时 `maybeSummarizePrevAi` 仍按原逻辑停手,因此追补速度 = 每次生成一楼;想一次补完请用摘要页「批量补摘」。
+- `block` = 原版行为,提示楼文案末尾多了一行「不想被拦:设置页改为照常生成」。
+
+对应单测:`src/memory/engine.test.ts` → `backlog policy`;设置回灌:`src/api/settings.hydrate.test.ts`。
+
 ## 7. 构建与测试
 
 ```bash
 npm install --no-audit --no-fund     # 或 pnpm install
-npm test        # vitest 8 文件 225 条 + timeRel / vector-depth / memory 回归脚本
+npm test        # vitest 9 文件 232 条 + timeRel / vector-depth / memory 回归脚本
 npm run build   # 产出 dist/index.js、dist/index.css(dist 已随仓库提交,直接安装即可用)
 npm run test:phone   # 小手机联动模块的纯 Node 冒烟测试
 ```
@@ -115,6 +133,6 @@ npm run test:phone   # 小手机联动模块的纯 Node 冒烟测试
 - 从原版 1.2.9 升级:直接覆盖安装;所有新功能默认开启但**无副作用**(锚点需要你触发,备份需要你点,外部记录需要手机推送)。
 - 回退到原版:删除本扩展、重新安装原版即可;融合版写入的 `chatMetadata.baibai_book_{anchor,external,trash,restore}` 键会被原版忽略,不影响其读取自己的数据。
 
-## 9. 发布前请改
-- `src/memory/update.ts` 顶部的 `REMOTE_MANIFEST_URL` 仍是占位符(含 `<your-account>`),所以融合版**不会**去检查更新;把它改成你自己仓库的 `manifest.json` raw 地址后重新 `npm run build` 即可恢复更新提示。
-- `manifest.json` 的 `homePage` 目前仍指向原作者仓库,发布到自己的仓库时请一并修改。
+## 9. 仓库地址配置
+- 本仓库已配置更新检测:`dist/index.js` 的 `REMOTE_MANIFEST_URL` 与 `manifest.json` 的 `homePage` 均指向 `ansdojaods/ST-BaiBai-Book-Tsukiyo`。
+- 若迁移仓库:改 `src/memory/update.ts` 顶部的 `REMOTE_MANIFEST_URL`(占位符含 `<` 时不会检查更新)后重新 `npm run build`,并同步修改 `manifest.json` 的 `homePage`。
