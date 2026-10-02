@@ -12,7 +12,9 @@
     "test:vector-depth": "node scripts/test-vector-depth.mjs",
     "test:memory": "node scripts/test-memory-regressions.mjs",
     "prewatch": "node scripts/sync-version.mjs",
-    "watch": "vite build --watch --mode development"
+    "watch": "vite build --watch --mode development",
+    "test:phone": "node phone/test/smoke.cjs",
+    "build:phone": "python3 phone/patch/apply_phone_patch.py phone/base/tsukiyo-phone-1.5.2.js phone/tsukiyo-phone-1.6.0.js && node phone/test/smoke.cjs"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.7",

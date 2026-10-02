@@ -1,3 +1,23 @@
+# 柏宝书 · 融合版(v1.3.0)
+
+> 基于 [柏柏的 ST-BaiBai-Book v1.2.9](https://github.com/baibai-git/ST-BaiBai-Book) 的非官方融合分支。**仍是纯前端 UI 扩展**,安装方式与原版相同(扩展 → 安装扩展 → 填本仓库地址)。
+> 新增:锚点日记(手动挡记忆)、白鸟数据可选后端备份 / 恢复点 / 回收站 / 诊断导出、API 渠道测活留痕,以及与「月夜来信小手机」的双向联动。
+
+| 新增 | 在哪 | 说明文档 |
+| --- | --- | --- |
+| 锚点日记:催更一次生成 `<anchor>` 剧情存档卡,版本化、可编辑 / 排除 / 回滚、正文隐藏标签、可替代锚点范围内的历史摘要 | 侧栏「联动」页 → 锚点日记 | [docs/FUSION.md §2](docs/FUSION.md) |
+| 备份与恢复:本地恢复点(默认 3 个)、回收站、可选的白鸟数据服务端快照(乐观并发)、诊断包 | 「联动」页 → 数据后端 | [docs/FUSION.md §3](docs/FUSION.md) |
+| 渠道测活:每渠道自定义测活短语、结果留存、一键全部测活、从小手机导入 API 方案 | 设置页 / 「联动」页 | [docs/FUSION.md §4](docs/FUSION.md) |
+| 小手机联动:`window.STBaiBaiBook.phone` 简报 / 外部记录 / 借用渠道;手机 1.6.0 补丁与导入 JSON | 「联动」页 → 小手机联动;`phone/` | [docs/PHONE_BRIDGE.md](docs/PHONE_BRIDGE.md) · [phone/README.md](phone/README.md) |
+
+快速开始:`npm install && npm test && npm run build`(`dist/` 已随仓库提交,可直接安装)。发布到自己的仓库前请改 `src/memory/update.ts` 的 `REMOTE_MANIFEST_URL` 与 `manifest.json` 的 `homePage`。
+
+**授权说明**:原版 ST-BaiBai-Book 未附带开源许可证,本分支仅供个人使用与向原作者提交合并请求参考;锚点日记为概念重写(原插件 AnchorNote 作者要求二改请先告知);世界背面(world-backstage)为保留所有权利的项目,本分支**未使用**其任何源码、提示词或文案,只独立实现了公开描述过的思路。
+
+---
+
+以下为原版 README。
+
 # 柏宝书 · SillyTavern 记忆引擎
 
 > 让你的角色真正「记得住」。柏宝书是一个为 SillyTavern 打造的长期记忆扩展——它会一边陪你聊，一边默默把剧情整理成摘要、盘点物品、记住登场人物、梳理来龙去脉，再在恰当的时候把这些记忆悄悄递给 AI。既省 token，又让长篇对话前后连贯、不失忆、不崩人设。
