@@ -32,6 +32,10 @@ export interface PublicCapabilities {
   macros: boolean;
   parameterizedMacros: boolean;
   events: true;
+  /** 【融合版】小手机联动命名空间 STBaiBaiBook.phone 可用 */
+  phoneBridge: true;
+  /** 【融合版】锚点日记可用 */
+  anchorDiary: true;
 }
 
 export interface PublicChatInfo {
@@ -208,4 +212,6 @@ export interface STBaiBaiBookApi {
   getContextAtFloor(options: { floor: number }): PublicFloorContext;
   query(request: PublicQueryRequest): PublicQueryResult;
   subscribe(listener: PublicChangeListener): () => void;
+  /** 【融合版】小手机联动命名空间(读简报 / 推送外部记录 / 借用渠道);见 docs/PHONE_BRIDGE.md */
+  readonly phone: import('@/bridge/phone').PhoneBridgeApi;
 }

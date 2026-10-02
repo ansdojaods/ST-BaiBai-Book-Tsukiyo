@@ -12,6 +12,8 @@ import { syncTopBarButton } from '@/topbar';
 import { syncQuickReplyButton } from '@/quickReply';
 import { bindFloorPanel } from '@/floorPanel';
 import { registerPublicInterface } from '@/public/register';
+import { bindFusion } from '@/fusion/bind';
+import { handleAnchorIntercept } from '@/anchor/engine';
 import { ui } from '@/state/ui';
 import { guardEditableArrowKeys } from '@/st/keyboard';
 import { versionedAssetUrl } from '@/version';
@@ -35,6 +37,12 @@ const HOST_ID = 'bbs-app-host';
   type: string | undefined,
 ): Promise<void> => {
   try {
+    // 【融合版】锚点日记:按本回合用户发言是否含触发词,决定是否注入锚点指令(同步、极轻)
+    try {
+      handleAnchorIntercept();
+    } catch (e) {
+      console.warn('[柏宝书] 锚点指令判定异常(忽略)', e);
+    }
     // 先走积压拦截:返回 true = 已 abort 本次生成,无需召回(生成不会发生)。
     const intercepted = await handleGenerationIntercept(type, abort);
     // 放行且该类型需要召回 → 阻塞式向量召回(写注入槽后再放行生成)。
@@ -133,6 +141,8 @@ function bindMemoryWhenReady(attempt = 0) {
       // 设置先 hydrate:从 extension_settings 载入(或从旧 localStorage 迁移),之后才跨设备同步
       hydrateSettings();
       bindChatLifecycle();
+      // 【融合版】锚点日记 / 外部记录 / 回收站 / 恢复点 / 后端同步 / 小手机联动(需在注入刷新前载入数据)
+      bindFusion();
       // 公共读取接口不依赖记忆引擎开关；聊天载入后立即暴露，供其它插件/脚本读取。
       void registerPublicInterface();
       bindEngine();

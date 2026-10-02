@@ -310,44 +310,46 @@ export async function requestViaMainApi(messages: ChatMsg[], _opts: RequestOptio
   return content;
 }
 
-/** 连通性测试:发一条极短请求 */
-export async function testChannel(channel: ApiChannel): Promise<{ ok: boolean; message: string }> {
+/**
+ * 连通性测试:发一条极短请求。
+ * 【融合版】支持渠道专属测活用语(channel.testPrompt,借鉴小手机的「每方案独立测活」),
+ * 并把结果写回 channel.lastTest 留存,设置页可直接看到上次测活时间与结论。
+ */
+export async function testChannel(channel: ApiChannel, phrase?: string): Promise<{ ok: boolean; message: string }> {
   const primaryUrl = normalizeUrl(channel.url);
+  const text = (phrase ?? channel.testPrompt ?? '').trim() || '回复"ok"两个字符即可。';
+  const messages: ChatMsg[] = [{ role: 'user', content: text }];
+  const remember = (r: { ok: boolean; message: string }) => {
+    channel.lastTest = { at: Date.now(), ok: r.ok, message: r.message.slice(0, 300) };
+    return r;
+  };
   try {
-    const reply = await requestCompletionAtUrl(
-      channel,
-      [{ role: 'user', content: '回复"ok"两个字符即可。' }],
-      primaryUrl,
-    );
+    const reply = await requestCompletionAtUrl(channel, messages, primaryUrl);
     const changed = channel.url.trim().replace(/\/+$/, '') !== primaryUrl;
     if (changed) channel.url = primaryUrl;
-    return {
+    return remember({
       ok: true,
-      message: `连通正常${changed ? `,已采用:${primaryUrl}` : ''},返回:${reply.slice(0, 40)}`,
-    };
+      message: `连通正常${changed ? `,已采用:${primaryUrl}` : ''},返回:${reply.slice(0, 120)}`,
+    });
   } catch (e) {
     if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 405)) {
-      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      return remember({ ok: false, message: e instanceof Error ? e.message : String(e) });
     }
 
     const fallbackUrl = alternateUrl(primaryUrl);
     if (!fallbackUrl || fallbackUrl === primaryUrl) {
-      return { ok: false, message: e.message };
+      return remember({ ok: false, message: e.message });
     }
     try {
-      const reply = await requestCompletionAtUrl(
-        channel,
-        [{ role: 'user', content: '回复"ok"两个字符即可。' }],
-        fallbackUrl,
-      );
+      const reply = await requestCompletionAtUrl(channel, messages, fallbackUrl);
       channel.url = fallbackUrl;
-      return {
+      return remember({
         ok: true,
-        message: `连通正常,已自动改用:${fallbackUrl},返回:${reply.slice(0, 40)}`,
-      };
+        message: `连通正常,已自动改用:${fallbackUrl},返回:${reply.slice(0, 120)}`,
+      });
     } catch {
       // 备用地址也失败时保留首个错误,避免把模型名等真实问题掩盖成路径错误。
-      return { ok: false, message: e.message };
+      return remember({ ok: false, message: e.message });
     }
   }
 }

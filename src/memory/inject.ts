@@ -18,6 +18,8 @@ import { fmtItems, fmtPlans, fmtResolvedPlans, renderVarsState, selectRecentReso
 import { fmtLifeDetail } from './lifeDetails';
 import { fmtNpcAffinity, fmtNpcTiesContext, NPC_AFFINITY_BRIEFING } from './npcRelations';
 import { memory } from './store';
+import { buildAnchorInjectionText, currentAnchor } from '@/anchor/store';
+import { buildExternalInjectionText } from '@/bridge/external';
 import { compactTimeLabel, formatRange, latestStoryTime, splitTimeLabel, timeTagPrompt } from './timeTag';
 import { relativeTimeLabel, weekdayLabel, ageDisplay, calculateRelativeDays } from './timeRel';
 import { selectViewNodes, selectLifeDetailsForInjection, type ViewNode } from './select';
@@ -47,6 +49,11 @@ const STATE_INJECT_DEPTH_BEFORE_LATEST_AI = 2;
 /** 时间标签提示词独立注入到 D0(最底、最贴近下一条回复),作为对「下一条回复」的最强指令,
  *  不与状态快照(D1/D2)同层 */
 const TIMETAG_INJECT_DEPTH = 0;
+/** 【融合版】锚点日记 slot:深度随设置(默认 4,比当前状态更靠前一点、比历史摘要靠后) */
+const ANCHOR_INJECT_KEY = 'baibai_book_anchor';
+/** 【融合版】外部记录(小手机等)slot:贴近最近对话,深度 3 */
+const EXTERNAL_INJECT_KEY = 'baibai_book_external';
+const EXTERNAL_INJECT_DEPTH = 3;
 
 /**
  * 一条叶子是否「已启用」(应注入)。
@@ -271,12 +278,58 @@ export function renderHistoryNodesWithRelative(nodes: ViewNode[], now: string): 
     .join('\n\n');
 }
 
+/**
+ * 【融合版】求某视图节点覆盖的最大楼层:叶子=所在楼;原子导入=floorEnd;压缩节点=递归子节点最大值。
+ * 返回 -1 表示无法判断(保守起见视为不在锚点覆盖范围内,仍然注入)。
+ */
+function nodeFloorEndResolver(chat: STMessage[] | null): (n: ViewNode) => number {
+  const leafFloor = new Map<string, number>();
+  chat?.forEach((m, i) => {
+    const leaf = getLeaf(m);
+    if (leaf) leafFloor.set(leaf.id, i);
+  });
+  const comps = new Map(memory.summaries.map(s => [s.id, s]));
+  const memo = new Map<string, number>();
+  const endOfId = (id: string, depth: number): number => {
+    if (memo.has(id)) return memo.get(id)!;
+    if (depth > 20) return -1;
+    let end = -1;
+    const lf = leafFloor.get(id);
+    if (lf !== undefined) end = lf;
+    else {
+      const c = comps.get(id);
+      if (c) {
+        if (c.imported && typeof c.importedFloorEnd === 'number') end = c.importedFloorEnd;
+        else for (const cid of c.childIds) end = Math.max(end, endOfId(cid, depth + 1));
+      }
+    }
+    memo.set(id, end);
+    return end;
+  };
+  return (n: ViewNode) => {
+    if (n.kind === 'leaf') return n.msgIndex;
+    if (n.atomic && typeof n.floorEnd === 'number') return n.floorEnd;
+    return endOfId(n.id, 0);
+  };
+}
+
 /** 组合历史摘要注入文本;无启用摘要时返回空串(注入空串等于清除)。 */
 export function buildHistoryInjectionText(): string {
   const chat = getContext()?.chat ?? null;
 
   // 从森林选「最高存活压缩层」节点(被收纳的不重复、窗口内全文叶子不注入)
-  const sums = selectInjectionNodes(memory.summaries, chat);
+  let sums = selectInjectionNodes(memory.summaries, chat);
+  // 【融合版】锚点覆盖范围内的历史摘要可选不再注入(锚点已概括它们),省 token 也避免两份口径打架
+  if (apiSettings.anchor?.enabled && apiSettings.anchor.supersedeHistory) {
+    const a = currentAnchor();
+    if (a && a.floor >= 0) {
+      const endOf = nodeFloorEndResolver(chat);
+      sums = sums.filter(n => {
+        const end = endOf(n);
+        return end < 0 || end > a.floor;
+      });
+    }
+  }
   if (!sums.length) return '';
   // 注入路径带相对时间前缀;参照点 = 故事内最新时间(读正文标签,不受是否已摘影响)
   // 首尾私密简报框定,避免主模型把摘要当成要复述/输出的模板
@@ -616,7 +669,7 @@ export function buildStateInjectionText(): string {
   const openPlans = memory.plans
     .filter(p => p.status === 'open')
     .map(p => ({ kind: p.kind, content: p.content, createdTime: p.createdTime, targetTime: p.targetTime }));
-  st.push(`未了结的计划/悬念:\n${fmtPlans(openPlans)}`);
+  st.push(`未了结的计划/悬念:\n${fmtPlans(openPlans, memory.state.time)}`);
 
   // 近期已完成的计划/悬念:防 AI 把刚了结的当未完成又去推进。与副API摘要同口径,只差截止点
   // (这里用全量 memory.plans;副API用 deriveMemory(chat, beforeIndex).plans)。
@@ -673,6 +726,8 @@ export function estimateInjectionTokenBreakdown(): { summary: number; other: num
     other: estimateTextTokens([
       buildStateInjectionText(),
       apiSettings.autoSummaryEnabled ? timeTagPrompt() : '',
+      buildAnchorInjectionText(),
+      buildExternalInjectionText(),
     ]),
   };
 }
@@ -694,6 +749,9 @@ export function refreshInjection(): void {
   fn(STATE_INJECT_KEY, buildStateInjectionText(), IN_CHAT, stateDepth, false, ROLE_SYSTEM, null);
   // 时间标签固定提示词:跟随自动摘要开关注入主对话,关闭时注入空串(等于清除)
   fn(TIMETAG_INJECT_KEY, apiSettings.autoSummaryEnabled ? timeTagPrompt() : '', IN_CHAT, TIMETAG_INJECT_DEPTH, false, ROLE_SYSTEM, null);
+  // 【融合版】锚点日记 + 外部记录(小手机)
+  fn(ANCHOR_INJECT_KEY, buildAnchorInjectionText(), IN_CHAT, Math.max(0, apiSettings.anchor?.injectDepth ?? 4), false, ROLE_SYSTEM, null);
+  fn(EXTERNAL_INJECT_KEY, buildExternalInjectionText(), IN_CHAT, EXTERNAL_INJECT_DEPTH, false, ROLE_SYSTEM, null);
 }
 
 /** 清除注入(注入空串)。切到无记忆的聊天时由 refreshInjection 自动完成,此处供显式调用。 */
@@ -704,4 +762,6 @@ export function clearInjection(): void {
   ctx?.setExtensionPrompt?.(HISTORY_INJECT_KEY, '', IN_CHAT, HISTORY_INJECT_DEPTH, false, ROLE_SYSTEM, null);
   ctx?.setExtensionPrompt?.(STATE_INJECT_KEY, '', IN_CHAT, stateDepth, false, ROLE_SYSTEM, null);
   ctx?.setExtensionPrompt?.(TIMETAG_INJECT_KEY, '', IN_CHAT, TIMETAG_INJECT_DEPTH, false, ROLE_SYSTEM, null);
+  ctx?.setExtensionPrompt?.(ANCHOR_INJECT_KEY, '', IN_CHAT, Math.max(0, apiSettings.anchor?.injectDepth ?? 4), false, ROLE_SYSTEM, null);
+  ctx?.setExtensionPrompt?.(EXTERNAL_INJECT_KEY, '', IN_CHAT, EXTERNAL_INJECT_DEPTH, false, ROLE_SYSTEM, null);
 }

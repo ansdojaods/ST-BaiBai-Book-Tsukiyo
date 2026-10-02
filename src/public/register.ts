@@ -1,6 +1,7 @@
 import { derivedMeta, memory } from '@/memory/store';
 import { getContext } from '@/st/context';
 import { PLUGIN_VERSION } from '@/version';
+import { createPhoneApi } from '@/bridge/phone';
 import { watch } from 'vue';
 import {
   bumpPublicRevision,
@@ -42,6 +43,8 @@ const capabilities: PublicCapabilities = {
   macros: false,
   parameterizedMacros: false,
   events: true,
+  phoneBridge: true,
+  anchorDiary: true,
 };
 
 const listeners = new Set<PublicChangeListener>();
@@ -124,6 +127,7 @@ function createApi(): STBaiBaiBookApi {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    phone: createPhoneApi(),
   });
 }
 

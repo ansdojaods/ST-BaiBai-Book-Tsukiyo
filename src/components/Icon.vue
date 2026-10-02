@@ -49,6 +49,13 @@ const PATHS: Record<string, string> = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12H5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/>',
   // 关闭
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  // 【融合版】联动(导航):两个相扣的环
+  fusion: '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/>',
+  // 【融合版】展开/收起
+  'chevron-down': '<path d="M6 9.5l6 6 6-6"/>',
+  'chevron-up': '<path d="M6 14.5l6-6 6 6"/>',
+  // 【融合版】回滚/恢复:逆时针箭头
+  rotate: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4.2h4.2"/>',
   // 对勾:确认/保存
   check: '<path d="M5 12.5 10 17.5 19 7"/>',
   // 新增/加号

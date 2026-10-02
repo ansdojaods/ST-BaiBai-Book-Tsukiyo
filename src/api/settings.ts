@@ -51,9 +51,78 @@ export interface ApiChannel {
    * 跨插件:与柏宝绘/柏宝砚共享同一份渠道(baibai_api_channels),三家字段名一致。
    */
   reasoningEffort: string;
+  /**
+   * 【融合版】专属测活用语(借鉴小手机的「每方案独立测活」):测试渠道时发送这句话而非固定的「回复 ok」,
+   * 便于确认模型身份/中转站是否偷换模型。空=用内置短句。
+   */
+  testPrompt: string;
+  /** 【融合版】上次测活结果留存(时间/是否成功/摘要),方便一眼看出哪个渠道挂了。 */
+  lastTest?: { at: number; ok: boolean; message: string };
 }
 
 export type TaskType = 'summary' | 'resummary';
+
+/* ======================= 融合版新增设置 ======================= */
+
+/**
+ * 锚点日记(思路来自 AnchorNote「锚点日记」,独立实现):
+ * 用户手动「催更」一次,让模型(或副 API)产出一份阶段性的全面总结(关系/人物/道具/梗/锚点事件),
+ * 作为柏宝书自动摘要之外的「手动挡」记忆层,随聊天保存、可回退版本。
+ */
+export interface AnchorSettings {
+  /** 功能开关 */
+  enabled: boolean;
+  /** 催更触发词:用户发言含此句 → 本回合注入锚点指令;「生成锚点日记」按钮填入的也是它 */
+  triggerPhrase: string;
+  /** 只在催更回合注入锚点指令(省 token);关=每回合都注入 */
+  onDemand: boolean;
+  /** 自定义锚点指令(空=内置模板) */
+  instruction: string;
+  /** 当前锚点注入主模型的深度(IN_CHAT depth) */
+  injectDepth: number;
+  /** 锚点覆盖范围内(≤ 锚点截止楼)的历史摘要不再注入,避免与锚点重复 */
+  supersedeHistory: boolean;
+  /** 用 ST 正则在显示层隐藏正文里的 <anchor> 块(提示词仍保留) */
+  hideTagInChat: boolean;
+  /** 注入锚点的最大字符(超出截断,保护上下文) */
+  maxChars: number;
+}
+
+/**
+ * 数据后端 / 备份(思路来自白鸟数据后端 + 世界背面的恢复点,独立实现):
+ * 柏宝书仍是纯前端扩展;若用户装了 ST-BaiNiaoData 服务端插件,可把记忆快照备份到服务器目录、
+ * 走乐观并发与回收站;未装时所有功能自动回落到本地(chatMetadata)。
+ */
+export interface BackendSettings {
+  /** 允许使用白鸟后端(检测到才生效;关=只用本地) */
+  enabled: boolean;
+  /** 每次总结/批量补摘完成后自动备份一份快照到后端 */
+  autoBackup: boolean;
+  /** 后端命名空间(逻辑隔离,不是安全边界) */
+  namespace: string;
+  /** 本地恢复点上限(每聊天;删旧留新) */
+  restorePoints: number;
+  /** 本地回收站保留条数上限 */
+  trashKeep: number;
+}
+
+/**
+ * 小手机联动(月夜来信小手机等外部脚本):
+ * 柏宝书向外提供「剧情简报」供手机读取,并接收手机推送的「外部记录」(手机聊天/约定/动态摘要),
+ * 按预算注入主模型、并作为摘要材料,让正文、摘要与手机三端共享同一份记忆。
+ */
+export interface PhoneBridgeSettings {
+  /** 联动总开关 */
+  enabled: boolean;
+  /** 把外部记录注入主模型 */
+  injectExternal: boolean;
+  /** 外部记录注入的字符预算 */
+  externalMaxChars: number;
+  /** 外部记录作为摘要/总结的附加材料(让摘要知道手机里发生了什么) */
+  includeInSummary: boolean;
+  /** 供手机读取的历史剧情字符预算 */
+  briefHistoryChars: number;
+}
 
 /** 自定义提示词:空串表示沿用 prompts.ts 内置模板,非空则整体覆盖该任务的模板。 */
 export interface CustomPrompts {
@@ -259,6 +328,12 @@ export interface ApiSettings {
   varsGlobalTemplate: VarTemplate;
   /** 角色变量模板:键=角色卡 avatar 文件名,值=该角色所有聊天共享的初始模板(值仍每聊天独立)。 */
   varsTemplateByChar: Record<string, VarTemplate>;
+  /** 【融合版】锚点日记 */
+  anchor: AnchorSettings;
+  /** 【融合版】数据后端 / 备份 */
+  backend: BackendSettings;
+  /** 【融合版】小手机联动 */
+  phoneBridge: PhoneBridgeSettings;
 }
 
 // extension_settings 里的命名空间键;localStorage 是旧版残留,仅用于一次性迁移。
@@ -310,7 +385,7 @@ function migrateLegacyUiPrefs(target: ApiSettings): void {
   }
 }
 
-function defaults(): ApiSettings {
+export function defaults(): ApiSettings {
   return {
     enabled: true,
     ui: {
@@ -371,11 +446,77 @@ function defaults(): ApiSettings {
     customStripTags: [],
     varsGlobalTemplate: { json: {}, meaning: '', rule: '' },
     varsTemplateByChar: {},
+    anchor: defaultAnchor(),
+    backend: defaultBackend(),
+    phoneBridge: defaultPhoneBridge(),
+  };
+}
+
+export function defaultAnchor(): AnchorSettings {
+  return {
+    enabled: true,
+    triggerPhrase: '请生成锚点日记',
+    onDemand: true,
+    instruction: '',
+    injectDepth: 4,
+    supersedeHistory: false,
+    hideTagInChat: true,
+    maxChars: 6000,
+  };
+}
+export function defaultBackend(): BackendSettings {
+  return { enabled: true, autoBackup: false, namespace: 'baibai-book', restorePoints: 3, trashKeep: 30 };
+}
+export function defaultPhoneBridge(): PhoneBridgeSettings {
+  return { enabled: true, injectExternal: true, externalMaxChars: 2500, includeInSummary: true, briefHistoryChars: 2400 };
+}
+
+function intIn(v: unknown, lo: number, hi: number, d: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.floor(v))) : d;
+}
+function boolOr(v: unknown, d: boolean): boolean {
+  return typeof v === 'boolean' ? v : d;
+}
+function strOr(v: unknown, d: string): string {
+  return typeof v === 'string' ? v : d;
+}
+
+/** 融合版嵌套设置的逐字段兜底(老数据没有这些键时全部回退默认)。 */
+function normalizeFusion(raw: Partial<ApiSettings>, merged: ApiSettings): void {
+  const a = (raw.anchor ?? {}) as Partial<AnchorSettings>;
+  const da = defaultAnchor();
+  merged.anchor = {
+    enabled: boolOr(a.enabled, da.enabled),
+    triggerPhrase: strOr(a.triggerPhrase, da.triggerPhrase),
+    onDemand: boolOr(a.onDemand, da.onDemand),
+    instruction: strOr(a.instruction, da.instruction),
+    injectDepth: intIn(a.injectDepth, 0, 200, da.injectDepth),
+    supersedeHistory: boolOr(a.supersedeHistory, da.supersedeHistory),
+    hideTagInChat: boolOr(a.hideTagInChat, da.hideTagInChat),
+    maxChars: intIn(a.maxChars, 500, 60000, da.maxChars),
+  };
+  const b = (raw.backend ?? {}) as Partial<BackendSettings>;
+  const db = defaultBackend();
+  merged.backend = {
+    enabled: boolOr(b.enabled, db.enabled),
+    autoBackup: boolOr(b.autoBackup, db.autoBackup),
+    namespace: /^[A-Za-z0-9_-]{1,64}$/.test(String(b.namespace ?? '')) ? String(b.namespace) : db.namespace,
+    restorePoints: intIn(b.restorePoints, 1, 10, db.restorePoints),
+    trashKeep: intIn(b.trashKeep, 5, 200, db.trashKeep),
+  };
+  const p = (raw.phoneBridge ?? {}) as Partial<PhoneBridgeSettings>;
+  const dp = defaultPhoneBridge();
+  merged.phoneBridge = {
+    enabled: boolOr(p.enabled, dp.enabled),
+    injectExternal: boolOr(p.injectExternal, dp.injectExternal),
+    externalMaxChars: intIn(p.externalMaxChars, 200, 20000, dp.externalMaxChars),
+    includeInSummary: boolOr(p.includeInSummary, dp.includeInSummary),
+    briefHistoryChars: intIn(p.briefHistoryChars, 200, 20000, dp.briefHistoryChars),
   };
 }
 
 /** 把任意来源的原始对象并入默认值,容错缺字段/类型不符。 */
-function normalize(raw: unknown): ApiSettings {
+export function normalize(raw: unknown): ApiSettings {
   if (!raw || typeof raw !== 'object') return defaults();
   const d = defaults();
   const merged = { ...d, ...(raw as Partial<ApiSettings>) };
@@ -460,6 +601,7 @@ function normalize(raw: unknown): ApiSettings {
       : 8192;
   // 副 API 渠道:逐个补全新加的字段(老数据没有 timeoutSec/stream/excludeParams),并校验类型
   merged.channels = (Array.isArray(merged.channels) ? merged.channels : []).map(normalizeChannel);
+  normalizeFusion(raw as Partial<ApiSettings>, merged);
   // 字数档位:仅两个合法值,旧数据缺失/非法回退详细(= 老用户行为不变)
   merged.verbosity = merged.verbosity === 'concise' ? 'concise' : 'detailed';
   // 叶子层保留条数:非负整数,缺失/非法回退默认 3(0=旧行为攒够即全压)
@@ -575,6 +717,11 @@ function normalizeChannel(c: Partial<ApiChannel>): ApiChannel {
       : [],
     // 后加字段:老渠道无此键 → 空串(auto,不发参数),行为与加字段前完全一致
     reasoningEffort: typeof c.reasoningEffort === 'string' ? c.reasoningEffort.trim() : '',
+    testPrompt: typeof c.testPrompt === 'string' ? c.testPrompt : '',
+    lastTest:
+      c.lastTest && typeof c.lastTest === 'object' && typeof c.lastTest.at === 'number'
+        ? { at: c.lastTest.at, ok: !!c.lastTest.ok, message: String(c.lastTest.message ?? '') }
+        : undefined,
   };
 }
 
@@ -944,6 +1091,7 @@ export function newChannel(): ApiChannel {
     prefill: true,
     excludeParams: [],
     reasoningEffort: '',
+    testPrompt: '',
   };
 }
 

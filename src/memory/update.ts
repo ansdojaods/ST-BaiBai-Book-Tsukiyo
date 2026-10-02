@@ -18,8 +18,13 @@ import { PLUGIN_VERSION } from '@/version';
  */
 const CURRENT_VERSION = PLUGIN_VERSION;
 
-/** 远端 manifest:GitHub raw(带时间戳绕缓存)。homePage 指向 baibai-git/ST-BaiBai-Book。 */
-const REMOTE_MANIFEST_URL = 'https://raw.githubusercontent.com/baibai-git/ST-BaiBai-Book/main/manifest.json';
+/**
+ * 远端 manifest:GitHub raw(带时间戳绕缓存)。
+ * 【融合版】这里不能再指向上游 baibai-git/ST-BaiBai-Book——否则上游一发新版,"一键更新"会把融合版覆盖掉。
+ * 发布到自己的仓库后把下面的占位换成 `https://raw.githubusercontent.com/<账号>/<仓库>/main/manifest.json`;
+ * 含 '<' 的占位会让检测直接跳过(不报错、不误报)。
+ */
+const REMOTE_MANIFEST_URL = 'https://raw.githubusercontent.com/<your-account>/ST-BaiBai-Book-Fusion/main/manifest.json';
 
 /** 对外响应式状态:驱动设置 tab 角标与设置页版本区块。 */
 export const updateState = reactive<{
@@ -81,6 +86,7 @@ async function readRemoteVersion(): Promise<string> {
  * 一次会话只主动查一次;force=true 跳过该限制(供「重新检查」手动触发)。
  */
 export async function checkForUpdate(force = false): Promise<void> {
+  if (REMOTE_MANIFEST_URL.includes('<')) return; // 【融合版】未配置自己的仓库地址 → 不检测
   if (updateState.checking) return;
   if (checkedThisSession && !force) return;
   updateState.checking = true;

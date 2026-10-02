@@ -14,6 +14,8 @@ import { renderSourceHints, type SourceExcerpt } from './sourceHints';
 import { memory, recomputeDerived, scheduleLeafFlush } from './store';
 import type { LeafExtra, SummaryDelta } from './types';
 import { scheduleVectorIndex } from './vector';
+import { buildExternalSummaryMaterial } from '@/bridge/external';
+import { createRestorePoint } from '@/backend/restore';
 import { invalidateRecallCache } from './vector/cache';
 import { clearRecallInjection } from './vector/recall';
 import { reactive, watch } from 'vue';
@@ -1188,6 +1190,11 @@ async function summarizeFloorWork(
   if (charCard) messages.push({ role: 'system', content: buildCharCardSystem(charCard) });
   if (persona) messages.push({ role: 'system', content: buildPersonaSystem(persona) });
   if (worldInfo) messages.push({ role: 'system', content: buildWorldInfoSystem(worldInfo) });
+  // 【融合版】小手机等外部记录作为摘要材料(本楼段范围内的、或未标楼层的近期记录)
+  {
+    const ext = buildExternalSummaryMaterial(targets[0] - 1, aiFloor);
+    if (ext) messages.push({ role: 'system', content: ext });
+  }
   messages.push(
     { role: 'system', content: prompt.system },
     { role: 'user', content: prompt.user },
@@ -1348,6 +1355,11 @@ async function summarizeBatchWork(
   if (charCard) messages.push({ role: 'system', content: buildCharCardSystem(charCard) });
   if (persona) messages.push({ role: 'system', content: buildPersonaSystem(persona) });
   if (worldInfo) messages.push({ role: 'system', content: buildWorldInfoSystem(worldInfo) });
+  // 【融合版】外部记录作为批量摘要材料(块覆盖范围内)
+  {
+    const ext = buildExternalSummaryMaterial(Math.min(...block) - 1, Math.max(...block));
+    if (ext) messages.push({ role: 'system', content: ext });
+  }
   messages.push(
     { role: 'system', content: prompt.system },
     { role: 'user', content: prompt.user },
@@ -1423,6 +1435,14 @@ export async function batchBackfill(opts: BatchBackfillOpts = {}): Promise<Batch
   // 目标楼层:显式传入则过滤成「当前确实待摘的 AI 楼」(防陈旧),否则取全部待摘
   const pending = new Set(pendingAiFloors(chat));
   const floors = (opts.floors ?? [...pending]).filter(f => pending.has(f)).sort((a, b) => a - b);
+  // 【融合版】大改之前先留一个恢复点(空状态不建)
+  if (floors.length) {
+    try {
+      createRestorePoint(`批量补摘 ${floors.length} 楼前`);
+    } catch (e) {
+      console.warn('[柏宝书] 建恢复点失败(不影响补摘)', e);
+    }
+  }
   const total = floors.length;
   if (total === 0) {
     await afterSummaryHideAndInject(chat);

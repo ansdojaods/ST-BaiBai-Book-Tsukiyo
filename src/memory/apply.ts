@@ -10,6 +10,7 @@ import { scheduleVectorIndex } from './vector';
 import { invalidateRecallCache } from './vector/cache';
 import { createEmptyMemory } from './types';
 import type { BaibaiMemory, ItemDelta, ItemLogEntry, JsonValue, LeafExtra, LifeDetailAdd, LifeDetailUpdate, MemLifeDetail, MemNpc, MemPlan, MemScene, MemSummary, NpcAffinity, NpcDelta, NpcPresence, PlanResolveItem, ProtagonistDelta, SceneDelta, SceneFocus, SceneOp, SceneReparent, StoredDelta, SummaryDelta, VarOp, VarTemplate, VarTier } from './types';
+import { trashPush } from '@/backend/trash';
 
 // 供既有调用方继续从 apply 取在场类型;定义在 types.ts 与名册展示共用。
 export type { NpcPresence } from './types';
@@ -2123,6 +2124,13 @@ export function removeScene(path: string[]): boolean {
 export function deleteLeafAt(index: number): boolean {
   const chat = getContext()?.chat;
   if (!chat || !chat[index]?.extra?.bbs_leaf) return false;
+  // 【融合版】先进回收站再删
+  try {
+    const leaf = chat[index].extra!.bbs_leaf!;
+    trashPush({ kind: 'leaf', title: `#${index} 叶子摘要:${String(leaf.text ?? '').slice(0, 40)}`, payload: { msgIndex: index, leaf: JSON.parse(JSON.stringify(leaf)) } });
+  } catch (e) {
+    console.warn('[柏宝书] 回收站写入失败', e);
+  }
   delete (chat[index].extra as Record<string, unknown>).bbs_leaf;
   recomputeDerived();
   pruneBrokenComps();
@@ -2274,6 +2282,13 @@ export function editSummary(id: string, text: string): boolean {
 export function deleteSummary(id: string): boolean {
   const idx = memory.summaries.findIndex(s => s.id === id);
   if (idx < 0) return false;
+  // 【融合版】先进回收站再删
+  try {
+    const node = memory.summaries[idx];
+    trashPush({ kind: 'summary', title: `总结L${node.level}:${node.text.slice(0, 40)}`, payload: JSON.parse(JSON.stringify(node)) });
+  } catch (e) {
+    console.warn('[柏宝书] 回收站写入失败', e);
+  }
   for (const p of memory.summaries) {
     if (p.childIds.includes(id)) p.childIds = p.childIds.filter(c => c !== id);
   }
@@ -2329,13 +2344,28 @@ export function deleteSummarySubtrees(rootIds: string[]): DeleteSummarySubtreesR
 
   const chat = getContext()?.chat;
   let leaves = 0;
+  // 【融合版】整棵子树(总结节点 + 叶子)打包进回收站,恢复时一次放回
+  const trashLeaves: Array<{ msgIndex: number; leaf: LeafExtra }> = [];
   if (chat && leafIds.size) {
-    for (const message of chat) {
+    chat.forEach((message, i) => {
       const leaf = getLeaf(message);
-      if (!leaf || !leafIds.has(leaf.id)) continue;
+      if (!leaf || !leafIds.has(leaf.id)) return;
+      trashLeaves.push({ msgIndex: i, leaf: JSON.parse(JSON.stringify(leaf)) });
       delete (message.extra as Record<string, unknown>).bbs_leaf;
       leaves++;
+    });
+  }
+  try {
+    const trashSums = memory.summaries.filter(summary => summaryIds.has(summary.id));
+    if (trashSums.length || trashLeaves.length) {
+      trashPush({
+        kind: 'subtree',
+        title: `批量删除:${trashSums.length} 个总结节点、${trashLeaves.length} 条叶子`,
+        payload: { summaries: JSON.parse(JSON.stringify(trashSums)), leaves: trashLeaves },
+      });
     }
+  } catch (e) {
+    console.warn('[柏宝书] 回收站写入失败', e);
   }
 
   const summariesBefore = memory.summaries.length;

@@ -18,6 +18,7 @@ const channel: ApiChannel = {
   prefill: true,
   excludeParams: [],
   reasoningEffort: '',
+  testPrompt: '',
 };
 
 describe('buildRequestBody:思考强度与两条源分支', () => {

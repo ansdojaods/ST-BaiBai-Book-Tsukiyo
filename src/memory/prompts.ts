@@ -18,6 +18,7 @@ import { apiSettings, type Verbosity } from '@/api/settings';
 import { fmtLifeDetail } from './lifeDetails';
 import { fmtNpcSummaryList, NPC_AFFINITY_FIELDS, type NpcSummaryView } from './npcRelations';
 import { RULE_COMPLETE_TIME_ANCHOR } from './timeTag';
+import { calculateRelativeDays } from './timeRel';
 import type { ItemLogEntry, JsonValue, MemLifeDetail, MemPlan, MemProtagonist, PlanOutcome, SceneFocus } from './types';
 
 /** 一个可用占位符(宏):token 用于插入,desc 给用户看「这里会替换成什么」。 */
@@ -951,14 +952,31 @@ export function fmtResolvedPlans(plans: MemPlan[]): string {
     .join('\n');
 }
 
-export function fmtPlans(plans: BuildArgs['openPlans']): string {
+/**
+ * 【融合版】目标时间相对提示(思路来自世界背面的事件期限感知,独立实现):
+ * 给定故事内当前时间,把目标时间换算成「还有 N 天 / 就是今天 / 已过 N 天」,
+ * 让主模型对临近/逾期的约定有感知。任一时间解析失败返回 ''(不影响原格式)。
+ */
+export function dueHint(now: string | undefined, target: string | undefined): string {
+  if (!now?.trim() || !target?.trim()) return '';
+  const d = calculateRelativeDays(now.trim(), target.trim());
+  if (typeof d !== 'number' || !Number.isFinite(d)) return '';
+  if (d === 0) return '就是今天';
+  if (d > 0) return d === 1 ? '明天' : `还有 ${d} 天`;
+  return d === -1 ? '昨天已到期' : `已过 ${-d} 天`;
+}
+
+export function fmtPlans(plans: BuildArgs['openPlans'], now?: string): string {
   if (!plans.length) return '  (无)';
   return plans
     .map((p, idx) => {
       // 时间括注:有创建/目标时间才带上,格式 A —— (立于 X · 目标 Y),任一缺失则只显示存在的那个
       const parts: string[] = [];
       if (p.createdTime?.trim()) parts.push(`立于 ${p.createdTime.trim()}`);
-      if (p.targetTime?.trim()) parts.push(`目标 ${p.targetTime.trim()}`);
+      if (p.targetTime?.trim()) {
+        const hint = now ? dueHint(now, p.targetTime) : '';
+        parts.push(`目标 ${p.targetTime.trim()}${hint ? `,${hint}` : ''}`);
+      }
       const time = parts.length ? `(${parts.join(' · ')})` : '';
       return `  p${idx + 1}. [${p.kind === 'suspense' ? '悬念' : '计划'}] ${oneLine(p.content)}${time}`;
     })

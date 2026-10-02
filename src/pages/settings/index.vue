@@ -191,6 +191,21 @@ async function doTest(ch: ApiChannel) {
   const r = await testChannel(ch);
   testing.value[ch.id] = r.message;
 }
+// 【融合版】批量测活:顺序测全部渠道,结果写回各渠道 lastTest(列表里直接看 ✓/✗)
+const batchTesting = ref(false);
+async function testAllChannels() {
+  if (batchTesting.value) return;
+  batchTesting.value = true;
+  try {
+    for (const ch of apiSettings.channels) await doTest(ch);
+  } finally {
+    batchTesting.value = false;
+  }
+}
+function lastTestMark(ch: ApiChannel): string {
+  if (!ch.lastTest) return '';
+  return ch.lastTest.ok ? '✓' : '✗';
+}
 
 // 各渠道拉取到的模型列表 + 拉取状态
 const models = ref<Record<string, string[]>>({});
@@ -917,15 +932,21 @@ function exportPublicApiDocument() {
         <!-- 渠道:顶部添加按钮 + 紧凑只读列表(点行进弹窗编辑),不再一长列表单平铺 -->
         <div class="bbs-channel-bar">
           <span class="bbs-field-label">渠道</span>
-          <button class="bbs-btn bbs-btn-primary bbs-btn-sm" type="button" @click="addChannel('api')">
-            <Icon name="plus" /> 添加渠道
-          </button>
+          <span class="bbs-channel-bar-acts">
+            <button v-if="apiSettings.channels.length" class="bbs-btn bbs-btn-sm" type="button" :disabled="batchTesting" title="依次测试全部渠道" @click="testAllChannels">
+              <Icon name="plug" /> {{ batchTesting ? '测活中…' : '全部测活' }}
+            </button>
+            <button class="bbs-btn bbs-btn-primary bbs-btn-sm" type="button" @click="addChannel('api')">
+              <Icon name="plus" /> 添加渠道
+            </button>
+          </span>
         </div>
 
         <ul v-if="apiSettings.channels.length" class="bbs-channel-list">
           <li v-for="ch in apiSettings.channels" :key="ch.id" class="bbs-channel-item">
             <button class="bbs-channel-open" type="button" @click="openChannel(ch.id)">
               <span class="bbs-channel-item-name">{{ ch.name || '未命名渠道' }}</span>
+              <span v-if="ch.lastTest" class="bbs-channel-item-test" :class="ch.lastTest.ok ? 'bbs-channel-item-test-ok' : 'bbs-channel-item-test-bad'" :title="ch.lastTest.message">{{ lastTestMark(ch) }}</span>
               <span class="bbs-channel-item-model">{{ ch.model || '未设模型' }}</span>
             </button>
           </li>
@@ -1792,6 +1813,16 @@ function exportPublicApiDocument() {
           />
           <span class="bbs-field-hint">这些参数会在发请求前从请求体里删除,用于规避不接受该参数的兼容端点报错。逗号分隔,留空则不排除。</span>
         </label>
+        <label class="bbs-modal-field">
+          <span class="bbs-modal-label">测活用语(可选)</span>
+          <input
+            v-model="editingChannel.testPrompt"
+            class="bbs-input"
+            type="text"
+            placeholder="留空=「回复 ok」;如:只回答你的模型名"
+          />
+          <span class="bbs-field-hint">【融合版】测试渠道时发送这句话;写成「只回答你的模型名」可顺带核对中转站有没有偷换模型。上次结果:{{ editingChannel.lastTest ? `${editingChannel.lastTest.ok ? '成功' : '失败'} · ${new Date(editingChannel.lastTest.at).toLocaleString()}` : '尚未测过' }}</span>
+        </label>
         <p v-if="testing[editingChannel.id]" class="bbs-channel-test">{{ testing[editingChannel.id] }}</p>
 
         <footer class="bbs-modal-foot">
@@ -2352,6 +2383,22 @@ function exportPublicApiDocument() {
 .bbs-channel-open:hover {
   border-color: var(--bbs-accent);
   background: var(--bbs-surface);
+}
+/* 【融合版】渠道栏右侧动作组 + 列表里的测活结果角标 */
+.bbs-channel-bar-acts {
+  display: inline-flex;
+  gap: 6px;
+}
+.bbs-channel-item-test {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+}
+.bbs-channel-item-test-ok {
+  color: var(--bbs-accent);
+}
+.bbs-channel-item-test-bad {
+  color: var(--bbs-danger, #c0392b);
 }
 /* 渠道名:完整显示,允许换行,占据剩余空间 */
 .bbs-channel-item-name {

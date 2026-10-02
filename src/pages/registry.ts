@@ -5,6 +5,7 @@ import Scenes from './scenes/index.vue';
 import Settings from './settings/index.vue';
 import Summary from './summary/index.vue';
 import Vars from './vars/index.vue';
+import Fusion from './fusion/index.vue';
 
 export interface PageDef {
   /** 唯一 id,存进 ui.activePage / localStorage;同时作为 Icon 的 name */
@@ -26,6 +27,7 @@ export const PAGES: PageDef[] = [
   { id: 'scenes', label: '场景', component: Scenes },
   { id: 'npcs', label: '角色', component: Npcs },
   { id: 'vars', label: '变量', component: Vars },
+  { id: 'fusion', label: '联动', component: Fusion },
   { id: 'settings', label: '设置', component: Settings },
 ];
 
