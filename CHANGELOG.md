@@ -1,3 +1,13 @@
+# 1.4.0 剧情剪辑台
+
+- **主题：剧情剪辑台（楼层摘要树 / 状态账本 / 缺口 / 召回注入 / 待确认草稿）**：新增引擎侧模块 `src/features/memory-editor/`（EDITOR_VERSION 1.0.0）——三层摘要、剧情状态账本、记忆缺口与补课、本地可解释召回（哈希词频余弦，零外部依赖）、楼层收纳、草稿与撤回、脱敏诊断、配置/档案导入导出。
+- 新增 `window.STBaiBaiBook.memoryEditor`（`apiVersion` 1）：`capability() / mirror() / info() / recall() / mergeExternal() / mergePhoneNotes() / exportArchive() / diagnostics()`，并广播 `st-baibai-book:memory-editor`；既有公开 API 语义不变。
+- 与月夜来信小手机（≥ v2.9.1）互斥：引擎接管楼层记忆后，手机侧不再生成楼层摘要、不再注入楼层记忆；手机记录仍按原通道单向汇入（`mergePhoneNotes`）。
+- 宿主接线（`src/features/memory-editor/host.ts`）：状态按聊天落盘 `chatMetadata.bbs_editor_state`；生成走副 API「摘要」渠道（支持 AbortSignal）、无渠道回退主 API `generateRaw`；注入独立槽 `baibai_book_editor`（D4，切聊天即清空）；楼层/缺口口径与 `getFloor` / `coverage.missingAiFloors` 完全一致；`busy()` 让行引擎摘要与批量任务。
+- 入口：魔杖菜单 →「剧情剪辑台」（面板挂主 shadow root，默认隐藏）。
+- 未接：楼层收纳的 `hideFloors/showFloors`（可选端口）——引擎窗口自动隐藏已管理楼层可见性，侧路再隐藏会冲突；模块对缺失端口自动降级为「不可用」。
+- 测试：模块 55 项全绿（`tests/memory-editor/`，`npx tsc -p tsconfig.test.json` 编到 `.build/`，已加 .gitignore）；vue-tsc 0 报错；vitest + timeRel(810)/vector-depth(12)/memory(53) 回归通过；`vite build` 重建 dist。
+
 # 1.3.4 / 手机 1.6.3
 
 - 为异步摘要/锚点和隐藏操作增加会话代次与输入一致性检查。
