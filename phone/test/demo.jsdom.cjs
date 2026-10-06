@@ -2,7 +2,7 @@
 // 用法: node phone/test/demo.jsdom.cjs [bundle.js]
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
-let src = fs.readFileSync(process.argv[2] || require('path').join(__dirname, '..', 'tsukiyo-phone-1.6.3.js'), 'utf8');
+let src = fs.readFileSync(process.argv[2] || require('path').join(__dirname, '..', 'tsukiyo-phone-2.5.0.js'), 'utf8');
 src = src.replace('baibaiRuntime.enabled = eng.bridge.mode !== "demo";', 'baibaiRuntime.enabled = true;');
 const code = src.slice(0, src.lastIndexOf('TsukiyoPhoneBundle.start('));
 const dom = new JSDOM('<!doctype html><html><body><div id="chat"></div></body></html>', { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost/' });

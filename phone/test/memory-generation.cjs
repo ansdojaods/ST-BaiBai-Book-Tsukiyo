@@ -1,6 +1,6 @@
 // Execute the actual built phone bundle, without its auto-start. No network or real ST.
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict'), path = require('node:path');
-let code = fs.readFileSync(path.join(__dirname, '..', 'tsukiyo-phone-1.6.3.js'), 'utf8');
+let code = fs.readFileSync(path.join(__dirname, '..', 'tsukiyo-phone-2.5.0.js'), 'utf8');
 code = code.slice(0, code.lastIndexOf('TsukiyoPhoneBundle.start(')).replace('return __toCommonJS(index_exports);',
   'return {PhoneActions, baibaiRuntime, baibaiReadEnabled, baibaiMemoryCandidates, baibaiFilterInput, actorContext, BaiBaiLink, syncBaibaiMainNpcsToContacts, tpModuleMeta, tpDeleteBar, freshPhone, validatePhone};');
 const window = {};

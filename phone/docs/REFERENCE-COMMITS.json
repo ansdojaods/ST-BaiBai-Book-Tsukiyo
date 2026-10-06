@@ -1,0 +1,32 @@
+[
+  {
+    "repository": "SillyTavern-CMCC",
+    "commit": "2cbdf71fa5603ec4739ae1c592ee94248969ee84",
+    "manifestVersion": "1.3.5",
+    "licenseFilePresent": true
+  },
+  {
+    "repository": "random-event-director",
+    "commit": "5b7043bb7827a091e66fd84935928676655b2ff4",
+    "manifestVersion": "0.1.8",
+    "licenseFilePresent": true
+  },
+  {
+    "repository": "npc-parallel",
+    "commit": "eb1aca9933f24171c8b3e35971f08a9c7877a680",
+    "manifestVersion": "1.0.7",
+    "licenseFilePresent": true
+  },
+  {
+    "repository": "st-direct-event",
+    "commit": "851acd9c577206128c20769f956a3778d0776a0d",
+    "manifestVersion": "0.5.2",
+    "licenseFilePresent": true
+  },
+  {
+    "repository": "WorldEngine",
+    "commit": "d8780ddc49a01428ef9ee4ced033aee839834204",
+    "manifestVersion": "2.4.0",
+    "licenseFilePresent": false
+  }
+]

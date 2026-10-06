@@ -2,7 +2,7 @@
 // 用法: node phone/test/smoke.cjs [bundle.js]
 const fs = require("fs");
 const path = require("path");
-const file = process.argv[2] || path.join(__dirname, "..", "tsukiyo-phone-1.6.3.js");
+const file = process.argv[2] || path.join(__dirname, "..", "tsukiyo-phone-2.5.0.js");
 const js = fs.readFileSync(file, "utf8");
 const between = (a, b) => { const i = js.indexOf(a); if (i < 0) throw Error("marker missing: " + a); const j = js.indexOf(b, i + a.length); return js.slice(i, j); };
 const utilsStart = js.indexOf("  // src/core/utils.js");
