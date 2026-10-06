@@ -9,7 +9,7 @@
  */
 import { MemoryEditorService } from "./service";
 import { createPanel } from "./ui/panel";
-import type { PanelOptions } from "./ui/panel";
+import type { PanelHandle, PanelOptions } from "./ui/panel";
 import type { MemoryEditorHandle, HostPort } from "./ports";
 import type { MemoryEditorMirror, MemoryEditorState } from "./types";
 
@@ -64,12 +64,15 @@ export const createMemoryEditor = (host: HostPort, options: CreateOptions = {}):
   service: MemoryEditorService;
   installGlobal(target?: Record<string, unknown>): () => void;
   panel(container: HTMLElement): () => void;
+  renderPanel(): void;
 } => {
   const service = new MemoryEditorService(host);
   if (options.autoInit !== false) service.init();
   const { autoInit: _autoInit, ...panelOptions } = options;
   let panelOff: (() => void) | null = null;
   let globalOff: (() => void) | null = null;
+  /** 当前面板句柄：供宿主（如抽屉顶栏的「刷新」按钮）强制重绘 */
+  let panelRef: PanelHandle | null = null;
   let lastMirrorAt = 0;
 
   const broadcast = (): void => {
@@ -93,13 +96,19 @@ export const createMemoryEditor = (host: HostPort, options: CreateOptions = {}):
     refresh(): void {
       broadcast();
     },
+    /** 重绘面板（读当前服务状态，不动数据）——抽屉顶栏「刷新」与面板开合时调用 */
+    renderPanel(): void {
+      panelRef?.render();
+    },
     attach(container: HTMLElement): () => void {
       if (panelOff) panelOff();
       const panel = createPanel(service, { onChange: broadcast, ...panelOptions });
+      panelRef = panel;
       container.appendChild(panel.el);
       panelOff = () => {
         panel.dispose();
         if (container.contains(panel.el)) container.removeChild(panel.el);
+        panelRef = null;
       };
       broadcast();
       return () => {

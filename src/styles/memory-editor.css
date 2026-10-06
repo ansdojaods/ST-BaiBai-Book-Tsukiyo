@@ -1,0 +1,140 @@
+/*
+ * 剧情剪辑台面板容器（#bme-panel-host）
+ *
+ * 为什么单独一份样式：
+ *  - 面板由 features/memory-editor 用纯 DOM 挂载，容器是主 shadow root 里与 Vue 应用（.bbs-root）**平级的兄弟节点**；
+ *    v1.4.0 之前它没有任何定位 / 层级 / 背景 / 边框样式 —— 在酒馆里的表现就是「挤在页面流末尾的一坨文字、
+ *    半透明、被 #chat 盖住、开关看不出变化」。
+ *  - 主题令牌（--bbs-*）定义在 .bbs-root 上，兄弟节点取不到值，所以这里同时做两件事：
+ *      ① index.ts 给容器加上 .bbs-root 类并同步 data-theme；
+ *      ② 本文件的每条属性都带兜底值，即使令牌缺失也不会变成透明无字。
+ *  - 开合靠 [hidden] 属性，这里显式声明 #bme-panel-host[hidden]{display:none}，
+ *    避免「fixed + display:flex」把 hidden 顶掉导致面板永久挡在屏幕上。
+ */
+
+#bme-panel-host {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(460px, 100vw);
+  height: 100vh;
+  height: 100dvh;
+  z-index: 10050;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  /* 兜底：令牌缺失时也能看清 */
+  background: var(--bbs-surface, #ffffff);
+  color: var(--bbs-ink, #14213d);
+  font-family: var(--bbs-font-sans, 'MiSans', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: left;
+  border-left: 1px solid var(--bbs-line, #e2e1de);
+  box-shadow: -18px 0 48px -24px rgba(0, 0, 0, 0.45);
+  animation: bme-host-in var(--bbs-dur, 0.28s) var(--bbs-ease, ease-out) both;
+}
+
+/* 关掉时不占位、不拦点击 */
+#bme-panel-host[hidden] {
+  display: none !important;
+}
+
+@keyframes bme-host-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* —— 顶部条：标题 + 关闭 —— */
+#bme-panel-host .bme-host-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--bbs-line, #e2e1de);
+  background: var(--bbs-surface-2, #eeede8);
+}
+
+#bme-panel-host .bme-host-left {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#bme-panel-host .bme-host-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+#bme-panel-host .bme-host-hint {
+  font-size: 11px;
+  color: var(--bbs-ink-muted, #7d8699);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#bme-panel-host .bme-host-close,
+#bme-panel-host .bme-host-refresh {
+  flex: 0 0 auto;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--bbs-radius-pill, 999px);
+  border: 1px solid var(--bbs-line-strong, #cfbcbc);
+  background: transparent;
+  color: inherit;
+}
+
+#bme-panel-host .bme-host-close:hover,
+#bme-panel-host .bme-host-refresh:hover {
+  border-color: var(--bbs-accent, #ac6304);
+  color: var(--bbs-accent, #ac6304);
+}
+
+#bme-panel-host .bme-host-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* —— 内容区：面板本体挂在这里，自己滚动 —— */
+#bme-panel-host .bme-host-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 14px 20px;
+}
+
+/* 面板自己的页签条吸在内容区顶部：长列表（摘要树 / 待确认）滚动时不丢导航 */
+#bme-panel-host .bme-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 -14px 8px;
+  padding: 10px 14px 8px;
+  background: var(--bbs-surface, #ffffff);
+  box-shadow: 0 8px 12px -12px rgba(0, 0, 0, 0.35);
+}
+
+/* 小屏：整屏抽屉（与主窗口的移动端形态一致） */
+@media (max-width: 640px) {
+  #bme-panel-host {
+    width: 100vw;
+    border-left: 0;
+  }
+}

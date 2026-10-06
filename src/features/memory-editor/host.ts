@@ -35,20 +35,92 @@ const ROLE_SYSTEM = 0;
 export const memoryEditorApi: { current: Record<string, unknown> | null } = { current: null };
 
 let panelContainer: HTMLElement | null = null;
+let panelBody: HTMLElement | null = null;
 let editorBound = false;
+let escBound = false;
+let editorHandle: { refresh: () => void; renderPanel?: () => void } | null = null;
+
+/**
+ * 【1.4.1 修复】给面板容器搭一层「抽屉骨架」：标题条 + 可滚动内容区。
+ *
+ * 之前容器是空的：面板直接挂在 #bme-panel-host 上，而这个 div 既没有定位也没有层级，
+ * 主题令牌（.bbs-root 上的 --bbs-*）也取不到，所以酒馆里看到的是一坨挤在页面末尾、
+ * 半透明、被聊天盖住的文字。骨架 + memory-editor.css 一起把「显示不对」修掉。
+ */
+function ensureChrome(container: HTMLElement): HTMLElement {
+  const existing = container.querySelector<HTMLElement>(':scope > .bme-host-body');
+  if (existing) return existing;
+  container.textContent = '';
+
+  const left = document.createElement('div');
+  left.className = 'bme-host-left';
+  const title = document.createElement('strong');
+  title.className = 'bme-host-title';
+  title.textContent = '剧情剪辑台';
+  const hint = document.createElement('span');
+  hint.className = 'bme-host-hint';
+  hint.textContent = '楼层摘要 / 状态账本 / 记忆缺口 / 召回 · Esc 或「关闭」收起';
+  left.append(title, hint);
+
+  const actions = document.createElement('div');
+  actions.className = 'bme-host-actions';
+  const refresh = document.createElement('button');
+  refresh.type = 'button';
+  refresh.className = 'bme-host-refresh';
+  refresh.textContent = '刷新';
+  refresh.addEventListener('click', () => {
+    editorHandle?.renderPanel?.();
+    editorHandle?.refresh();
+  });
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'bme-host-close';
+  close.textContent = '关闭';
+  close.addEventListener('click', () => {
+    toggleMemoryEditorPanel(false);
+  });
+  actions.append(refresh, close);
+
+  const bar = document.createElement('div');
+  bar.className = 'bme-host-bar';
+  bar.append(left, actions);
+
+  const body = document.createElement('div');
+  body.className = 'bme-host-body';
+
+  container.append(bar, body);
+  return body;
+}
 
 /** mount() 阶段把面板容器交进来（主 shadow root 内、默认隐藏，由魔杖菜单开合） */
 export function mountMemoryEditorPanel(container: HTMLElement): void {
   panelContainer = container;
+  panelBody = ensureChrome(container);
+  // 极端顺序（剪辑台实例早于 mount 建好）时补挂一次，避免面板落在容器外
+  if (editorHandle && panelBody && !panelBody.contains(panelBody.lastElementChild ?? panelBody)) {
+    editorHandle.renderPanel?.();
+  }
 }
 
-/** 魔杖菜单开合；返回开合后的可见状态 */
-export function toggleMemoryEditorPanel(): boolean {
+/** 魔杖菜单开合；返回开合后的可见状态。传 false 表示强制收起（关闭按钮 / Esc 用） */
+export function toggleMemoryEditorPanel(force?: boolean): boolean {
   if (!panelContainer) return false;
-  panelContainer.hidden = !panelContainer.hidden;
-  return !panelContainer.hidden;
+  panelContainer.hidden = typeof force === 'boolean' ? !force : !panelContainer.hidden;
+  const open = !panelContainer.hidden;
+  if (open) {
+    editorHandle?.renderPanel?.();
+    if (!escBound) {
+      escBound = true;
+      // 只在第一次打开时挂一次：Esc 收起面板（不拦其它按键，不阻止冒泡）
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && panelContainer && !panelContainer.hidden) toggleMemoryEditorPanel(false);
+      });
+    }
+  }
+  return open;
 }
 
+/** 兼容旧调用点（menu.ts 只用得到 toggleMemoryEditorPanel） */
 function floorRole(m: STMessage): 'user' | 'assistant' | 'system' {
   if (m.is_user) return 'user';
   return isRealAiReply(m) ? 'assistant' : 'system';
@@ -174,9 +246,15 @@ export function bindMemoryEditor(): void {
     const apiHolder: Record<string, unknown> = {};
     editor.installGlobal(apiHolder);
     memoryEditorApi.current = apiHolder;
-    if (panelContainer) editor.attach(panelContainer);
-    // 引擎数据变化(摘要/台账/设置)时刷新只读镜像广播
-    window.addEventListener('st-baibai-book:changed', () => editor.refresh());
+    // 面板挂到抽屉骨架的内容区（bme-host-body），不是容器本身；骨架由 mountMemoryEditorPanel 建好
+    editorHandle = editor;
+    const mountPoint = panelContainer ? (panelBody ?? ensureChrome(panelContainer)) : null;
+    if (mountPoint) editor.attach(mountPoint);
+    // 引擎数据变化(摘要/台账/设置)时刷新只读镜像广播 + 面板重绘
+    window.addEventListener('st-baibai-book:changed', () => {
+      editor.refresh();
+      editor.renderPanel();
+    });
     console.log('[柏宝书] 剧情剪辑台已绑定（memoryEditor API 已挂载，入口：魔杖菜单 → 剧情剪辑台）');
   } catch (e) {
     console.error('[柏宝书] 剧情剪辑台绑定失败', e);

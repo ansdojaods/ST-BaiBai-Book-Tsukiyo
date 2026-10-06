@@ -1,3 +1,17 @@
+# 1.4.1 剪辑台显示修复 + 去重
+
+- **修复「剧情剪辑台在酒馆里显示不对」**：
+  - 根因一：面板容器 `#bme-panel-host` 与 Vue 根节点 `.bbs-root` 是 shadow root 里的**兄弟节点**，而主题令牌 `--bbs-*` 定义在 `.bbs-root` 上 —— 容器里所有 `var(--bbs-*)` 取不到值（背景透明、字号颜色随宿主漂移）；现给容器补上 `.bbs-root` 类与 `data-theme`，并 `watch(ui.theme)` 跟随主题切换。
+  - 根因二：容器此前**没有任何 CSS**（全仓库搜不到 `#bme-panel-host` 规则），`position:static` + `display:contents` 的父级 → 面板排在页面流末尾、被 `#chat` 盖住，`hidden` 也压不住布局；现新增 `src/styles/memory-editor.css`：右侧抽屉（fixed / `z-index 10050` / 整高 / 主题化配色 + 兜底值 / 窄屏整屏 / `[hidden]` 显式 `display:none` / 页签条吸顶）。
+  - 面板加骨架（`host.ts → ensureChrome()`）：标题条 +「刷新」「关闭」+ 可滚动内容区；`toggleMemoryEditorPanel(force?)` 支持强制收起，打开时重绘并绑一次 `Esc`。
+  - `createMemoryEditor()` 新增 `renderPanel()`；引擎 `st-baibai-book:changed` 事件现在同时重绘面板（此前只在创建时渲染一次，打开时可能看到旧内容）。
+  - 详细定位过程与可调项见 `docs/剪辑台显示修复_1.4.1.md`。
+- **去掉与手机仓库重复的 `phone/` 镜像**（46 个文件 / 约 11MB：1.5.2 基线、1.6.3/2.0/2.5 脚本、补丁脚本、vendor 参考件、旧发行 JSON），手机已由独立仓库 `ansdojaods/tsukiyo-phone`（v2.9.2）维护；移除 `package.json` 的 `test:phone` / `build:phone` / `test:phone-ui`，`verify` 改为 `typecheck → test → build → check:local`。
+- **README 清理**：删除误粘贴的 `</content>` / `</invoke>` 片段；新增「与月夜来信小手机的关系（谁是谁）」一节，把三者（百宝月夜书 / 剧情剪辑台 / 小手机）的边界与三条联动链路写清楚。
+- 验证：`vue-tsc` 0 报错；vitest 302 项 + timeRel 810 / vector-depth 12 / memory 53 断言全绿；`vite build` 重建 `dist/`；`check:local` 通过。
+
+---
+
 # 1.4.0 剧情剪辑台
 
 - **主题：剧情剪辑台（楼层摘要树 / 状态账本 / 缺口 / 召回注入 / 待确认草稿）**：新增引擎侧模块 `src/features/memory-editor/`（EDITOR_VERSION 1.0.0）——三层摘要、剧情状态账本、记忆缺口与补课、本地可解释召回（哈希词频余弦，零外部依赖）、楼层收纳、草稿与撤回、脱敏诊断、配置/档案导入导出。

@@ -19,9 +19,11 @@ import { ui } from '@/state/ui';
 import { guardEditableArrowKeys } from '@/st/keyboard';
 import { versionedAssetUrl } from '@/version';
 import { watch } from 'vue';
-// 这两行让 Vite 把全局样式打进 dist/index.css(随后注入 shadow root)
+// 这几行让 Vite 把全局样式打进 dist/index.css(随后注入 shadow root)
 import '@/styles/base.css';
 import '@/styles/theme.css';
+// 【1.4.1】剧情剪辑台抽屉容器样式：容器与 Vue 根是兄弟节点，样式与主题令牌都得自己带
+import '@/styles/memory-editor.css';
 import { createApp } from 'vue';
 
 const HOST_ID = 'bbs-app-host';
@@ -114,11 +116,20 @@ function mount() {
   app.mount(container);
 
   // 【1.4.0】剧情剪辑台面板容器:活在主 shadow root 里,默认隐藏,由魔杖菜单「剧情剪辑台」开合
+  // 【1.4.1】必须挂上 .bbs-root 与 data-theme:主题令牌(--bbs-*)定义在 .bbs-root 上,
+  // 而本容器与 Vue 应用的根节点是兄弟关系,不加这一层就拿不到变量(面板会半透明、字号错乱)。
   const editorHost = document.createElement('div');
   editorHost.id = 'bme-panel-host';
+  editorHost.className = 'bbs-root';
+  editorHost.setAttribute('data-theme', ui.theme);
   editorHost.hidden = true;
   shadow.appendChild(editorHost);
   mountMemoryEditorPanel(editorHost);
+  // 设置页/题首切换主题时,抽屉里的变量跟着换
+  watch(
+    () => ui.theme,
+    theme => editorHost.setAttribute('data-theme', theme),
+  );
 
   $(window).on('pagehide', () => app.unmount());
 }

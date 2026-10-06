@@ -3,10 +3,10 @@
   "loading_order": 100,
   "requires": [],
   "optional": [],
-  "js": "dist/index.js?ver=1.4.0",
+  "js": "dist/index.js?ver=1.4.1",
   "generate_interceptor": "bbs_generateInterceptor",
   "author": "柏柏(原作) / 月夜来信整合",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "homePage": "https://github.com/ansdojaods/ST-BaiBai-Book-Tsukiyo",
   "auto_update": false,
   "minimum_client_version": "1.12.13"

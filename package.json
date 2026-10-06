@@ -1,6 +1,6 @@
 {
   "name": "st-baibai-book-tsukiyo",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,12 +13,11 @@
     "test:memory": "node scripts/test-memory-regressions.mjs",
     "prewatch": "node scripts/sync-version.mjs",
     "watch": "vite build --watch --mode development",
-    "test:phone": "node phone/test/smoke.cjs && node phone/test/memory-generation.cjs && node phone/test/visual.cjs && node phone/test/studio.cjs",
-    "build:phone": "python3 phone/patch/build_v25.py && npm run test:phone",
     "typecheck": "vue-tsc --noEmit",
-    "test:phone-ui": "node phone/test/demo.jsdom.cjs",
     "check:local": "node scripts/check-local-only.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run check:local && npm run build:phone && npm run test:phone-ui"
+    "verify": "npm run typecheck && npm test && npm run test:editor && npm run build && npm run check:local",
+    "build:editor-tests": "tsc -p tsconfig.test.json && node -e \"require('node:fs').writeFileSync('.build/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\"",
+    "test:editor": "npm run build:editor-tests && node tests/memory-editor/run-all.cjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
@@ -32,5 +31,5 @@
   "dependencies": {
     "vue": "^3.5.35"
   },
-  "description": "百宝月夜书：手写楼层补摘、可选手机记忆读取、本地备份恢复（无白鸟远程后端）"
+  "description": "百宝月夜书：剧情剪辑台（楼层摘要树 / 状态账本 / 召回）+ 手写楼层补摘 + 可选手机联动 + 本地备份恢复（无白鸟远程后端）"
 }
