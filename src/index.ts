@@ -12,6 +12,7 @@ import { syncTopBarButton } from '@/topbar';
 import { syncQuickReplyButton } from '@/quickReply';
 import { bindFloorPanel } from '@/floorPanel';
 import { registerPublicInterface } from '@/public/register';
+import { bindMemoryEditor, mountMemoryEditorPanel } from '@/features/memory-editor/host';
 import { bindFusion } from '@/fusion/bind';
 import { handleAnchorIntercept } from '@/anchor/engine';
 import { ui } from '@/state/ui';
@@ -112,6 +113,13 @@ function mount() {
   app.directive('autosize', vAutosize);
   app.mount(container);
 
+  // 【1.4.0】剧情剪辑台面板容器:活在主 shadow root 里,默认隐藏,由魔杖菜单「剧情剪辑台」开合
+  const editorHost = document.createElement('div');
+  editorHost.id = 'bme-panel-host';
+  editorHost.hidden = true;
+  shadow.appendChild(editorHost);
+  mountMemoryEditorPanel(editorHost);
+
   $(window).on('pagehide', () => app.unmount());
 }
 
@@ -143,6 +151,8 @@ function bindMemoryWhenReady(attempt = 0) {
       bindChatLifecycle();
       // 【融合版】锚点日记 / 外部记录 / 回收站 / 恢复点 / 后端同步 / 小手机联动(需在注入刷新前载入数据)
       bindFusion();
+      // 【1.4.0】剧情剪辑台:创建实例并注入 STBaiBaiBook.memoryEditor(须在 registerPublicInterface 之前)
+      bindMemoryEditor();
       // 公共读取接口不依赖记忆引擎开关；聊天载入后立即暴露，供其它插件/脚本读取。
       void registerPublicInterface();
       bindEngine();

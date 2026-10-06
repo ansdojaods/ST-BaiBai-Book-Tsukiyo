@@ -1,6 +1,8 @@
 import { openBook } from '@/state/ui';
+import { toggleMemoryEditorPanel } from '@/features/memory-editor/host';
 
 const MENU_ITEM_ID = 'bbs-menu-item';
+const MENU_EDITOR_ID = 'bbs-menu-editor-item';
 
 /**
  * 往 ST 的 #extensionsMenu(魔杖菜单)末尾注入"柏宝书"入口。
@@ -29,6 +31,22 @@ export function injectMenuButton() {
     });
 
     $menu.append($item);
+
+    // 【1.4.0】剧情剪辑台开合入口
+    const $editor = $(`
+      <div class="extension_container interactable" tabindex="0">
+        <a id="${MENU_EDITOR_ID}" class="list-group-item" href="#" title="剧情剪辑台（楼层摘要 / 状态账本 / 召回）">
+          <i class="fa-solid fa-clapperboard"></i>
+          <span>剧情剪辑台</span>
+        </a>
+      </div>
+    `);
+    $editor.on('click', (e: { preventDefault: () => void }) => {
+      e.preventDefault();
+      toggleMemoryEditorPanel();
+      $('#extensionsMenu').hide();
+    });
+    $menu.append($editor);
     return true;
   };
 

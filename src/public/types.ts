@@ -214,4 +214,6 @@ export interface STBaiBaiBookApi {
   subscribe(listener: PublicChangeListener): () => void;
   /** 【融合版】小手机联动命名空间(读简报 / 推送外部记录 / 借用渠道);见 docs/PHONE_BRIDGE.md */
   readonly phone: import('@/bridge/phone').PhoneBridgeApi;
+  /** 【1.4.0】剧情剪辑台命名空间(capability/mirror/info/recall/mergeExternal/mergePhoneNotes/exportArchive/diagnostics);未绑定时为 undefined */
+  readonly memoryEditor?: Record<string, unknown>;
 }

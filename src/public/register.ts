@@ -2,6 +2,7 @@ import { derivedMeta, memory } from '@/memory/store';
 import { getContext } from '@/st/context';
 import { PLUGIN_VERSION } from '@/version';
 import { createPhoneApi } from '@/bridge/phone';
+import { memoryEditorApi } from '@/features/memory-editor/host';
 import { watch } from 'vue';
 import {
   bumpPublicRevision,
@@ -128,6 +129,10 @@ function createApi(): STBaiBaiBookApi {
       return () => listeners.delete(listener);
     },
     phone: createPhoneApi(),
+    /** 【1.4.0】剧情剪辑台(可选注入,见 features/memory-editor/host.ts);apiVersion 1 */
+    get memoryEditor(): Record<string, unknown> | undefined {
+      return memoryEditorApi.current ?? undefined;
+    },
   });
 }
 
