@@ -198,7 +198,13 @@ test("只读镜像够手机用，且不含正文全文与密钥", async () => {
 });
 test("capability 报的是引擎版本，apiVersion 固定 1", () => {
   const { service } = newEditor({ floors: 6, pluginVersion: "1.6.3" });
-  eq(service.capability(), { available: true, apiVersion: 1, pluginVersion: "1.6.3" });
+  eq(service.capability(), { available: true, apiVersion: 1, pluginVersion: "1.6.3", enabled: true, mode: "extra" });
+});
+test("【1.4.2】capability.enabled 跟着「剪辑台总开关」走（小手机据此决定要不要自己接管）", () => {
+  const { service } = newEditor({ floors: 6, pluginVersion: "1.6.3" });
+  service.state.enabled = false;
+  eq(service.capability().enabled, false);
+  ok(!service.info().enabled);
 });
 
 setGroup("service 自动维护");
@@ -287,4 +293,49 @@ test("撤回可以回滚确认动作", async () => {
   const label = service.undo();
   includes(label, "摘要");
   eq(service.state.tree.length, 0);
+});
+
+setGroup("service 1.4.2 接线修复");
+test("【1.4.2】生成结束后会清空注入槽（注入块只跟一次生成，不再一直挂着）", async () => {
+  const { service, host } = newEditor({ floors: 12 });
+  service.init();
+  service.state.cfg.recall.minScore = 0;
+  await service.generateBlock([0, 5]);
+  service.confirm(service.drafts()[0].id);
+  service.recall({ floor: 11 });
+  ok(host.injections[host.injections.length - 1].length > 0, "召回应当写进注入槽");
+  host.genEnd();
+  eq(host.injections[host.injections.length - 1], "", "生成结束后注入槽应被清空");
+  eq(typeof service.info().lastRecall.at, "number", "清空之后仍保留「上次召回」记录");
+});
+test("【1.4.2】宿主说自动摘要不归剪辑台时不自动生成（避免和柏宝书摘要森林重复调用模型）", async () => {
+  const { service, host } = newEditor({ floors: 24, autoSummaryAllowed: false });
+  service.init();
+  host.genEnd();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  eq(host.calls.length, 0);
+  eq(service.info().autoAllowed, false);
+  service.dispose();
+});
+test("【1.4.2】宿主允许时自动摘要照旧，并且会提示「待确认草稿」", async () => {
+  const { service, host } = newEditor({ floors: 24 });
+  service.init();
+  host.genEnd();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  eq(host.calls.length, 1);
+  eq(service.info().autoAllowed, true);
+  eq(host.toasts.length, 1);
+  includes(host.toasts[0], "待确认");
+  service.dispose();
+});
+test("【1.4.2】旧宿主（没实现 autoSummaryAllowed）按允许处理，行为不变", async () => {
+  const host = makeHost({ floors: 24 });
+  delete host.autoSummaryAllowed;
+  const service = createMemoryEditor(host, { autoInit: false }).service;
+  service.init();
+  host.genEnd();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  eq(host.calls.length, 1);
+  eq(service.info().autoAllowed, true);
+  service.dispose();
 });

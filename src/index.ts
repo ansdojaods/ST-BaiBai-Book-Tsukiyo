@@ -12,7 +12,7 @@ import { syncTopBarButton } from '@/topbar';
 import { syncQuickReplyButton } from '@/quickReply';
 import { bindFloorPanel } from '@/floorPanel';
 import { registerPublicInterface } from '@/public/register';
-import { bindMemoryEditor, mountMemoryEditorPanel } from '@/features/memory-editor/host';
+import { bindMemoryEditor, mountMemoryEditorPanel, runEditorRecall } from '@/features/memory-editor/host';
 import { bindFusion } from '@/fusion/bind';
 import { handleAnchorIntercept } from '@/anchor/engine';
 import { ui } from '@/state/ui';
@@ -52,6 +52,10 @@ const HOST_ID = 'bbs-app-host';
     // 召回内部自带向量开关/可用性判断,失败静默降级,绝不影响生成。
     if (!intercepted && shouldRecallForType(type)) {
       await runVectorRecall();
+      // 【1.4.2】剧情剪辑台的召回：写它自己的注入槽 baibai_book_editor（深度 4）。
+      // 契约是「生成前召回一次、生成结束后清空」——清空由剪辑台在自己的 onGenerationEnded 里做；
+      // 之前宿主一处都没调，剪辑台的召回实际从未生效（手动点一次还会一直挂着）。
+      runEditorRecall();
     }
   } catch (e) {
     console.error('[柏宝书] 生成拦截器异常(放行本次生成)', e);

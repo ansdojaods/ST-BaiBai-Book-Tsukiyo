@@ -13,7 +13,7 @@ import type { PanelHandle, PanelOptions } from "./ui/panel";
 import type { MemoryEditorHandle, HostPort } from "./ports";
 import type { MemoryEditorMirror, MemoryEditorState } from "./types";
 
-export type { HostPort, FloorRef, GenerateRequest, GenerateResult, MemoryEditorHandle } from "./ports";
+export type { HostPort, FloorRef, GenerateRequest, GenerateResult, MemoryEditorHandle, MemoryEditorCapability } from "./ports";
 export type {
   CoverageReport,
   Draft,
@@ -54,6 +54,12 @@ export const MEMORY_EDITOR_KEY = "memoryEditor";
 export interface CreateOptions extends PanelOptions {
   /** 是否在创建时立刻接上宿主的聊天/生成事件（默认 true） */
   autoInit?: boolean;
+  /**
+   * 【1.4.2】面板开合句柄（由宿主注入）。挂上后 `window.STBaiBaiBook.memoryEditor`
+   * 会多出 `open() / close() / toggle()`，供小手机等外部脚本一键打开剪辑台抽屉；
+   * 不注入时这三个方法存在但为空操作（旧宿主行为不变）。
+   */
+  panelControls?: { open(): void; close(): void; toggle(): void };
 }
 
 /**
@@ -68,7 +74,7 @@ export const createMemoryEditor = (host: HostPort, options: CreateOptions = {}):
 } => {
   const service = new MemoryEditorService(host);
   if (options.autoInit !== false) service.init();
-  const { autoInit: _autoInit, ...panelOptions } = options;
+  const { autoInit: _autoInit, panelControls, ...panelOptions } = options;
   let panelOff: (() => void) | null = null;
   let globalOff: (() => void) | null = null;
   /** 当前面板句柄：供宿主（如抽屉顶栏的「刷新」按钮）强制重绘 */
@@ -136,6 +142,10 @@ export const createMemoryEditor = (host: HostPort, options: CreateOptions = {}):
         apiVersion: 1,
         owner: "engine",
         capability: () => service.capability(),
+        // 【1.4.2】外部（小手机等）可以反过来打开/收起剪辑台抽屉
+        open: () => panelControls?.open(),
+        close: () => panelControls?.close(),
+        toggle: () => panelControls?.toggle(),
         mirror: () => service.mirror(),
         info: () => service.info(),
         recall: (options?: { query?: string; floor?: number; phoneOnly?: boolean; inject?: boolean }) => service.recall(options),
@@ -162,15 +172,3 @@ export const createMemoryEditor = (host: HostPort, options: CreateOptions = {}):
 };
 
 export default createMemoryEditor;
-
-/** 供没有全局 window 的宿主使用（例如测试环境） */
-export const describeEditor = (service: MemoryEditorService): string => {
-  const info = service.info();
-  const lines = [
-    `剧情剪辑台 ${info.editorVersion} · 引擎 ${info.pluginVersion}`,
-    `楼层 ${info.floors.valid}/${info.floors.total} 有效 · 覆盖到 #${info.coveredTo + 1} 楼`,
-    `摘要 ${info.summaries}（生效 ${info.activeSummaries}）· 状态 ${info.ledger} · 待确认 ${info.drafts} · 已收纳 ${info.hidden}`,
-    info.coverage ? `缺口 ${info.coverage.missing.length} 段 · 覆盖率 ${Math.round(info.coverage.ratio * 100)}%` : "缺口：无楼层",
-  ];
-  return lines.join("\n");
-};

@@ -74,6 +74,24 @@ const VERBOSITY_OPTIONS: { value: Verbosity; label: string }[] = [
   { value: 'concise', label: '精简' },
 ];
 
+/**
+ * 【1.4.2】自动摘要归属：柏宝书摘要森林（默认）/ 剧情剪辑台。
+ * 两边同时开自动摘要 = 同一段剧情两次模型调用 + 两个互相矛盾的缺口数字，
+ * 所以这里做成二选一，切换时顺手把另一边的开关关掉。
+ */
+const AUTO_SUMMARY_OWNER_OPTIONS: { value: 'book' | 'editor'; label: string }[] = [
+  { value: 'book', label: '柏宝书' },
+  { value: 'editor', label: '剧情剪辑台' },
+];
+const autoSummaryOwner = computed<'book' | 'editor'>({
+  get: () => (apiSettings.editorOwnsAutoSummary ? 'editor' : 'book'),
+  // 只切归属：柏宝书引擎的自动补摘随之让位/接回（engine.ts 里读这个字段），
+  // 不再顺手改「启用自动摘要」——那个开关还管着时间标签、旧楼隐藏与积压拦截。
+  set: (value) => {
+    apiSettings.editorOwnsAutoSummary = value === 'editor';
+  },
+});
+
 /** 摘要缺口策略:月夜版默认「照常生成」,原版「拦截」仅作可选 */
 const BACKLOG_OPTIONS: { value: BacklogPolicy; label: string }[] = [
   { value: 'pass', label: '照常生成(不拦截)' },
@@ -1137,6 +1155,11 @@ function exportPublicApiDocument() {
           <input v-model="apiSettings.autoSummaryEnabled" type="checkbox" class="bbs-checkbox" />
         </label>
         <p class="bbs-field-hint">开启后自动摘要并隐藏旧楼,同时启用正文时间标签(剧情时间锚点)。前面楼层漏摘时怎么办,由下方「摘要缺口时」决定(月夜版默认不拦截正文)。</p>
+        <div class="bbs-num-row">
+          <span class="bbs-field-label">自动摘要归属</span>
+          <BbsSelect v-model="autoSummaryOwner" :options="AUTO_SUMMARY_OWNER_OPTIONS" class="bbs-select-narrow" aria-label="自动摘要归属" />
+        </div>
+        <p class="bbs-field-hint">谁来做「自动摘要」这件事，二选一，避免同一段剧情被摘两次（两次模型调用 + 两个互相矛盾的缺口数字）。<b>柏宝书</b>（默认）：由本插件的摘要森林自动摘要；<b>剧情剪辑台</b>：改由剪辑台自动摘要，产出先落进它的「待确认」草稿再入库，柏宝书的自动补摘随之停下（时间标签、旧楼隐藏、积压拦截仍按上面的开关走）。</p>
         <div class="bbs-num-row">
           <span class="bbs-field-label">字数档位</span>
           <BbsSelect v-model="apiSettings.verbosity" :options="VERBOSITY_OPTIONS" class="bbs-select-narrow" aria-label="字数档位" />

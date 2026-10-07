@@ -129,6 +129,12 @@ export interface PhoneBridgeSettings {
   externalMaxChars: number;
   /** 外部记录作为摘要/总结的附加材料(让摘要知道手机里发生了什么) */
   includeInSummary: boolean;
+  /**
+   * 【1.4.2】「恋爱心迹」(kind = phone_heart) 是否一并注入主模型。
+   * 心迹与柏宝书自己的「锚点日记」内容相近，两个都注入时容易重复占上下文；关掉只影响注入，
+   * 记录仍留在「联动」页与摘要材料里。
+   */
+  injectHeart: boolean;
   /** 供手机读取的历史剧情字符预算 */
   briefHistoryChars: number;
 }
@@ -288,6 +294,12 @@ export interface ApiSettings {
   assignments: Record<TaskType, string>;
   /** 自动摘要开关。开启即一并启用:自动隐藏、正文时间标签、积压拦截(不再各自独立开关)。 */
   autoSummaryEnabled: boolean;
+  /**
+   * 【1.4.2】自动摘要归属：true = 由「剧情剪辑台」自动摘要（会同时把 autoSummaryEnabled 关掉），
+   * false（默认）= 由柏宝书自己的摘要森林自动摘要，剪辑台只在手动/补课时生成。
+   * 两边同时开 = 同一段剧情两次模型调用 + 两个互相矛盾的缺口数字，所以必须二选一。
+   */
+  editorOwnsAutoSummary: boolean;
   /**
    * 仅摘要模式。继续分析、保存结构化状态,但不向主模型注入当前状态,
    * 也不再把物品/变量变动旁注写回正文。已有正文旁注不主动清理。
@@ -456,6 +468,7 @@ export function defaults(): ApiSettings {
     channels: [],
     assignments: { summary: '', resummary: '', anchor: '' },
     autoSummaryEnabled: true,
+    editorOwnsAutoSummary: false,
     summaryOnlyMode: false,
     injection: { sceneFocus: true, lifeDetails: true, protagonist: true, npcs: true, npcAffinity: true, items: true, scenes: true },
     keepRecent: 3,
@@ -502,7 +515,7 @@ export function defaultBackend(): BackendSettings {
   return { restorePoints: 3, trashKeep: 30 };
 }
 export function defaultPhoneBridge(): PhoneBridgeSettings {
-  return { shareMemory: true, enabled: true, injectExternal: true, externalMaxChars: 2500, includeInSummary: true, briefHistoryChars: 2400 };
+  return { shareMemory: true, enabled: true, injectExternal: true, externalMaxChars: 2500, includeInSummary: true, injectHeart: true, briefHistoryChars: 2400 };
 }
 
 function intIn(v: unknown, lo: number, hi: number, d: number): number {
@@ -543,6 +556,7 @@ function normalizeFusion(raw: Partial<ApiSettings>, merged: ApiSettings): void {
     injectExternal: boolOr(p.injectExternal, dp.injectExternal),
     externalMaxChars: intIn(p.externalMaxChars, 200, 20000, dp.externalMaxChars),
     includeInSummary: boolOr(p.includeInSummary, dp.includeInSummary),
+    injectHeart: boolOr(p.injectHeart, dp.injectHeart),
     briefHistoryChars: intIn(p.briefHistoryChars, 200, 20000, dp.briefHistoryChars),
   };
 }
@@ -813,6 +827,7 @@ function applyInto(target: ApiSettings, src: ApiSettings): void {
   target.channels = src.channels;
   target.assignments = src.assignments;
   target.autoSummaryEnabled = src.autoSummaryEnabled;
+  target.editorOwnsAutoSummary = src.editorOwnsAutoSummary;
   target.summaryOnlyMode = src.summaryOnlyMode;
   target.injection = src.injection;
   target.keepRecent = src.keepRecent;

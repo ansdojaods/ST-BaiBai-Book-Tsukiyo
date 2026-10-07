@@ -31,6 +31,8 @@ const makeHost = (options = {}) => {
             ],
       ),
     missingFloors: () => options.missingFloors || [],
+    /** 【1.4.2】自动摘要归属：默认允许（旧宿主行为）；测试可传 autoSummaryAllowed:false 模拟让位 */
+    autoSummaryAllowed: () => options.autoSummaryAllowed !== false,
     loadState: () => (options.state ? JSON.parse(JSON.stringify(options.state)) : null),
     saveState: (state) => {
       host.saved += 1;
@@ -73,7 +75,8 @@ const makeHost = (options = {}) => {
       for (const mesid of mesids) host.hidden.delete(mesid);
       return mesids.length;
     },
-    toast: () => {},
+    toasts: [],
+    toast: (message) => host.toasts.push(message),
     log: () => {},
     onChatChanged: () => () => {},
     onGenerationEnded: (cb) => {

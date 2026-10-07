@@ -1,0 +1,30 @@
+{
+  "mainVersion": "1.4.2",
+  "phoneVersion": "2.9.5",
+  "baseDelivery": "1.4.1 / 2.9.4",
+  "verifiedAtUTC": "2026-10-07T07:59:42.681Z",
+  "commands": {
+    "npm ci": "PASS",
+    "npm run typecheck": "PASS (vue-tsc, 0 errors)",
+    "npm test": "PASS (vitest 302 + timeRel 810 + vector-depth 12 + memory-regressions 53)",
+    "npm run test:editor": "PASS (65/65)",
+    "npm run build": "PASS (vite, 143 modules)",
+    "npm run check:local": "PASS (LOCAL_ONLY_OK)"
+  },
+  "counts": {
+    "vitestFiles": 12,
+    "vitestTests": 302,
+    "editorTests": 65,
+    "timeRelAssertions": 810,
+    "vectorDepthAssertions": 12,
+    "memoryRegressionAssertions": 53
+  },
+  "scope": "Local source-level tests with mocked ST/LLM and a fake host for the memory editor; no real ST, network E2E, user deployment or GitHub push.",
+  "changes": "13 项优化落地（见 docs/联动接线修复_1.4.2.md）；剪辑台归属闸门；手机 2.9.5 归属联动见 docs/PHONE_BRIDGE.md（协议 v2）。",
+  "sha256": {
+    "dist/index.js": "3b9bec6c1866ba9301a200e58cb5a96e6c5afb5703c22a5c16c913db04509741",
+    "dist/index.css": "920d95831c155e3f080a898ab8c041fa70ae23711e2f43b35eea92899693f180",
+    "dist/index.js.map": "9b4ed1a7079290b91400048416ce302254c760f66aaa03df2352e81f861148a6",
+    "manifest.json": "8e3067a75898e3cc81e1f79aa3c7b3162f73a2c4f28440a8b703c9c195e7dd7a"
+  }
+}

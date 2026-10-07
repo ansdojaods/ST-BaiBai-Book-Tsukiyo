@@ -17,9 +17,11 @@ import { leafValid } from '@/memory/apply';
 import { cleanBody } from '@/memory/timeTag';
 import { getContext, type STMessage } from '@/st/context';
 import { requestCompletion, requestViaMainApi, mainApiAvailable, type ChatMsg } from '@/api/client';
-import { getChannelForTask } from '@/api/settings';
+import { apiSettings, getChannelForTask } from '@/api/settings';
 import { toast as stToast } from '@/st/toast';
 import { PLUGIN_VERSION } from '@/version';
+import { externalState } from '@/bridge/external';
+import { setEditorBadge } from './badge';
 import { createMemoryEditor } from './index';
 import type { HostPort, FloorRef, GenerateRequest, GenerateResult } from './ports';
 import type { MemoryEditorState } from './types';
@@ -33,6 +35,23 @@ const ROLE_SYSTEM = 0;
 
 /** register.ts 的 createApi 通过这个 holder 暴露 window.STBaiBaiBook.memoryEditor（免冻结问题） */
 export const memoryEditorApi: { current: Record<string, unknown> | null } = { current: null };
+
+/** 【1.4.2】剪辑台 service 的模块级引用：给生成拦截器一个「生成前召回」的入口 */
+let editorService: { recall: (options?: { floor?: number }) => unknown } | null = null;
+
+/**
+ * 【1.4.2】生成前调用一次剪辑台召回（写它自己的注入槽 baibai_book_editor）。
+ * 由 src/index.ts 的生成拦截器在放行路径上调用；剪辑台未绑定/已关闭/召回已关时内部自会
+ * 清空注入槽并返回 null，不抛错、不影响生成。
+ * 清空交给剪辑台自己在「生成结束」时做（一次生成一次注入，见 service.onGenerationEnded）。
+ */
+export function runEditorRecall(): void {
+  try {
+    editorService?.recall({});
+  } catch (e) {
+    console.warn('[柏宝书] 剪辑台召回异常（忽略，不影响生成）', e);
+  }
+}
 
 let panelContainer: HTMLElement | null = null;
 let panelBody: HTMLElement | null = null;
@@ -96,8 +115,10 @@ function ensureChrome(container: HTMLElement): HTMLElement {
 export function mountMemoryEditorPanel(container: HTMLElement): void {
   panelContainer = container;
   panelBody = ensureChrome(container);
-  // 极端顺序（剪辑台实例早于 mount 建好）时补挂一次，避免面板落在容器外
-  if (editorHandle && panelBody && !panelBody.contains(panelBody.lastElementChild ?? panelBody)) {
+  // 极端顺序（剪辑台实例早于 mount 建好）时补挂一次，避免面板落在容器外。
+  // 【1.4.2】原判断 panelBody.contains(panelBody.lastElementChild ?? panelBody) 恒为 true（自身总被包含），
+  // 补挂实际从未执行；改成看「内容区里有没有面板挂进去」。
+  if (editorHandle && panelBody && !panelBody.querySelector(':scope > .bme-root')) {
     editorHandle.renderPanel?.();
   }
 }
@@ -120,7 +141,7 @@ export function toggleMemoryEditorPanel(force?: boolean): boolean {
   return open;
 }
 
-/** 兼容旧调用点（menu.ts 只用得到 toggleMemoryEditorPanel） */
+/** 楼层角色：AI 正文算 assistant，非 AI 的系统/旁白算 system */
 function floorRole(m: STMessage): 'user' | 'assistant' | 'system' {
   if (m.is_user) return 'user';
   return isRealAiReply(m) ? 'assistant' : 'system';
@@ -187,6 +208,15 @@ function createHostPort(): HostPort {
       }
     },
 
+    /**
+     * 【1.4.2】自动摘要归属：柏宝书的摘要森林默认负责自动摘要，
+     * 剪辑台只在「柏宝书设置 → 摘要设置 → 自动摘要归属」选它时（或柏宝书自动摘要关掉时）才自动生成，
+     * 避免同一段剧情被两边各摘一次。
+     */
+    autoSummaryAllowed(): boolean {
+      return apiSettings.editorOwnsAutoSummary === true;
+    },
+
     busy(): boolean {
       // 引擎的摘要/批量任务在跑,或本模块自己已经在生成时,剪辑台都要让行
       return Boolean(engineState.running || batchState.running || currentSummaryPromise());
@@ -240,8 +270,31 @@ export function bindMemoryEditor(): void {
   if (editorBound) return;
   editorBound = true;
   try {
-    const editor = createMemoryEditor(createHostPort(), { autoInit: false, title: '剧情剪辑台' });
+    const editor = createMemoryEditor(createHostPort(), {
+      autoInit: false,
+      title: '剧情剪辑台',
+      // 【1.4.0 设计、1.4.2 接线】「汇入小手机记录」按钮的数据源：柏宝书【小手机】外部记录。
+      // 之前没人传这个 provider —— 按钮点了永远提示「没有可汇入的手机记录」。
+      notesProvider: () =>
+        externalState.notes
+          .filter((note) => note.source === 'tsukiyo-phone')
+          .map((note) => ({
+            id: note.id,
+            kind: note.kind,
+            title: note.title ?? '',
+            text: note.text,
+            floor: typeof note.floor === 'number' ? note.floor : undefined,
+            pinned: !!note.pinned,
+          })),
+      // 【1.4.2】让小手机等外部脚本可以反向打开/收起剪辑台抽屉
+      panelControls: {
+        open: () => void toggleMemoryEditorPanel(true),
+        close: () => void toggleMemoryEditorPanel(false),
+        toggle: () => void toggleMemoryEditorPanel(),
+      },
+    });
     editor.service.init();
+    editorService = editor.service as unknown as { recall: (options?: { floor?: number }) => unknown };
     // register.ts 的 createApi 是 Object.freeze 的,memoryEditor 子键经 holder 注入(见 register.ts)
     const apiHolder: Record<string, unknown> = {};
     editor.installGlobal(apiHolder);
@@ -250,11 +303,23 @@ export function bindMemoryEditor(): void {
     editorHandle = editor;
     const mountPoint = panelContainer ? (panelBody ?? ensureChrome(panelContainer)) : null;
     if (mountPoint) editor.attach(mountPoint);
-    // 引擎数据变化(摘要/台账/设置)时刷新只读镜像广播 + 面板重绘
+    // 引擎数据变化(摘要/台账/设置)时刷新只读镜像广播 + 面板重绘。
+    // 【1.4.2】① 面板收起时不再重建 DOM（监听的是 ST 的逐条消息事件，长聊天里很密集）；
+    //          ② 同轮多次事件合并成一次，避免一次生成重绘好几遍；
+    //          ③ 顺带把「待确认草稿数」写进魔杖菜单角标。
+    let renderQueued = false;
+    const syncBadge = (): void => setEditorBadge(editor.service.state.drafts.length);
     window.addEventListener('st-baibai-book:changed', () => {
       editor.refresh();
-      editor.renderPanel();
+      syncBadge();
+      if (!panelContainer || panelContainer.hidden || renderQueued) return;
+      renderQueued = true;
+      setTimeout(() => {
+        renderQueued = false;
+        if (panelContainer && !panelContainer.hidden) editor.renderPanel();
+      }, 120);
     });
+    syncBadge();
     console.log('[柏宝书] 剧情剪辑台已绑定（memoryEditor API 已挂载，入口：魔杖菜单 → 剧情剪辑台）');
   } catch (e) {
     console.error('[柏宝书] 剧情剪辑台绑定失败', e);

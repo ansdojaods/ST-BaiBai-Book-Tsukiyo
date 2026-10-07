@@ -1,5 +1,6 @@
 import { openBook } from '@/state/ui';
 import { toggleMemoryEditorPanel } from '@/features/memory-editor/host';
+import { getEditorBadge, onEditorBadge } from '@/features/memory-editor/badge';
 
 const MENU_ITEM_ID = 'bbs-menu-item';
 const MENU_EDITOR_ID = 'bbs-menu-editor-item';
@@ -46,6 +47,15 @@ export function injectMenuButton() {
       toggleMemoryEditorPanel();
       $('#extensionsMenu').hide();
     });
+    // 【1.4.2】角标：待确认草稿数（自动摘要产出后不再「悄悄躺在收起的面板里」）
+    const $label = $editor.find('span').first();
+    const applyBadge = (count: number): void => {
+      $label.text(count > 0 ? `剧情剪辑台 · ${count}` : '剧情剪辑台');
+      $editor.attr('title', count > 0 ? `剧情剪辑台（${count} 条草稿待确认）` : '剧情剪辑台（楼层摘要 / 状态账本 / 召回）');
+    };
+    applyBadge(getEditorBadge());
+    onEditorBadge(applyBadge);
+    // 注：菜单条目随页面生命周期存在，无需在外部清理时摘订阅（tryInject 只在不存在时重建）
     $menu.append($editor);
     return true;
   };

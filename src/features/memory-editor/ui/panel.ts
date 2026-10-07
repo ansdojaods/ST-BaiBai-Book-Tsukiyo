@@ -632,6 +632,13 @@ export const createPanel = (service: MemoryEditorService, options: PanelOptions 
           cfg.auto.enabled = next;
           state.mode = next ? "extra" : "manual";
         }, "关闭后只在你点按钮时生成"),
+        // 【1.4.2】自动摘要归属：柏宝书的摘要森林与剪辑台只能一边自动摘，否则同一段剧情摘两次
+        h(
+          "div",
+          { class: "bme-mut", style: "margin-top:4px", text: info.autoAllowed
+            ? "自动摘要当前归剪辑台负责（柏宝书 设置 → 摘要设置 → 自动摘要归属 可切回它的摘要森林）。"
+            : "自动摘要当前由柏宝书的摘要森林负责，剪辑台的自动生成已让位（只在手动/补课时生成）。想改用剪辑台：柏宝书 设置 → 摘要设置 → 自动摘要归属。" },
+        ),
         h(
           "div",
           { class: "bme-grid" },

@@ -50,6 +50,14 @@ export interface HostPort {
   /** 宿主侧额外报告的缺失楼层（例如 coverage.missingAiFloors），用于缺口合并 */
   missingFloors?(): number[];
 
+  /**
+   * 【1.4.2】自动摘要归属：返回 false 时剪辑台**不**再自动生成楼层摘要。
+   * 宿主未实现时按 true 处理（旧宿主行为不变）。
+   * 柏宝书宿主按「柏宝书设置 → 摘要设置 → 自动摘要归属」回答：默认由柏宝书的摘要森林负责，
+   * 避免同一段剧情被两边各自动摘要一次（两次模型调用、两个缺口数字）。
+   */
+  autoSummaryAllowed?(): boolean;
+
   /** 读取本聊天的剪辑台状态；没有就返回 null */
   loadState(): MemoryEditorState | null;
   /** 保存（宿主决定存哪里：聊天变量 / 扩展设置 / 世界书） */
@@ -79,12 +87,25 @@ export interface HostPort {
   mount?(container: HTMLElement): () => void;
 }
 
+export interface MemoryEditorCapability {
+  available: true;
+  apiVersion: number;
+  pluginVersion: string;
+  /**
+   * 【1.4.2】剪辑台总开关是否打开（面板「设置」页的「剪辑台总开关」）。
+   * 调用方（例如小手机）在 enabled:false 时应当作「引擎没在管」，
+   * 自己接管楼层记忆——否则会出现「剪辑台关了、手机也停手」的空档。
+   */
+  enabled: boolean;
+  mode: MemoryEditorState["mode"];
+}
+
 export interface MemoryEditorHandle {
   state(): MemoryEditorState;
   refresh(): void;
   /** 把面板挂到某个容器里（返回卸载函数） */
   attach(container: HTMLElement): () => void;
-  capability(): { available: true; apiVersion: number; pluginVersion: string };
+  capability(): MemoryEditorCapability;
   mirror(): MemoryEditorMirror;
   dispose(): void;
 }

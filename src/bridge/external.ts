@@ -262,7 +262,8 @@ export function buildExternalInjectionText(): string {
   const s = apiSettings.phoneBridge;
   if (!s?.enabled || !s.injectExternal) return '';
   const budget = Math.max(0, Math.floor(s.externalMaxChars));
-  const chosen = selectExternalNotes(Math.max(0, budget - 150));
+  // 【1.4.2】可选：把「恋爱心迹」排除在注入之外（心迹与柏宝书自己的锚点日记内容相近，两个都注入容易重复占上下文）
+  const chosen = selectExternalNotes(Math.max(0, budget - 150), n => s.injectHeart !== false || n.kind !== 'phone_heart');
   if (!chosen.length) return '';
   const groups = new Map<string, ExternalNote[]>();
   for (const n of chosen) {

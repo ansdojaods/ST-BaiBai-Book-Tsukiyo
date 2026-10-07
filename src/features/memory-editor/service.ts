@@ -11,7 +11,7 @@ import { DEFAULT_PROMPTS, JSON_TAIL, PROMPT_LABELS, promptOf } from "./core/prom
 import { EDITOR_VERSION, coerceState, diagnostics, exportConfig, freshConfig, freshState, importConfig } from "./core/state";
 import { dayStamp, mkId, parseJsonLoose, pickKeywords, rangeLabel, trimText } from "./core/util";
 import type { CoverageReport, Draft, LedgerDeltaRow, LedgerKind, MemoryEditorMirror, MemoryEditorState, PromptKind, RecallRecord, SummaryLevel, SummaryNode } from "./types";
-import type { FloorRef, GenerateRequest, HostPort } from "./ports";
+import type { FloorRef, GenerateRequest, HostPort, MemoryEditorCapability } from "./ports";
 
 const LEVEL_NAME: Record<SummaryLevel, string> = { 0: "剧情摘要", 1: "阶段总结", 2: "多次总结" };
 
@@ -30,6 +30,8 @@ export interface EditorInfo {
   ledger: number;
   coverage: CoverageReport | null;
   hidden: number;
+  /** 【1.4.2】自动摘要是否归剪辑台（宿主 autoSummaryAllowed() 的回答；false = 让位给柏宝书摘要森林） */
+  autoAllowed: boolean;
   shelveSupported: boolean;
   running: boolean;
   status: string;
@@ -45,6 +47,8 @@ export class MemoryEditorService {
   private running = false;
   private abort: AbortController | null = null;
   private lastInjection: RecallRecord | null = null;
+  /** 【1.4.2】注入槽里是否还挂着「还没被下一次生成消费掉」的召回块（决定生成结束要不要清空） */
+  private pendingInject = false;
   private status = "";
   private lastError = "";
   private progress: { done: number; total: number; range: [number, number] | null } | null = null;
@@ -64,6 +68,8 @@ export class MemoryEditorService {
         this.cancel("已切换聊天");
         this.state = coerceState(this.port.loadState());
         this.lastInjection = this.state.inject.last || null;
+        // 新聊天里旧注入不会自己生效（宿主切聊天时会清），不当作待消费
+        this.pendingInject = false;
         this.status = "";
       });
       this.disposers.push(off);
@@ -173,6 +179,7 @@ export class MemoryEditorService {
       ledger: this.state.ledger.length,
       coverage: this.coverageReport(),
       hidden: this.state.hidden.length,
+      autoAllowed: this.autoAllowed(),
       shelveSupported: typeof this.port.hideFloors === "function",
       running: this.running,
       status: this.progress ? `正在生成 ${this.progress.done + 1}/${this.progress.total}` : this.status,
@@ -183,8 +190,24 @@ export class MemoryEditorService {
     };
   }
 
-  capability(): { available: true; apiVersion: number; pluginVersion: string } {
-    return { available: true, apiVersion: 1, pluginVersion: this.port.pluginVersion() };
+  capability(): MemoryEditorCapability {
+    return {
+      available: true,
+      apiVersion: 1,
+      pluginVersion: this.port.pluginVersion(),
+      // 【1.4.2】把「剪辑台总开关」一并报出去：小手机据此判断要不要自己接管楼层记忆
+      enabled: this.state.enabled,
+      mode: this.state.mode,
+    };
+  }
+
+  /** 自动摘要归属：宿主没表态时按允许（旧宿主行为不变）。 */
+  private autoAllowed(): boolean {
+    try {
+      return this.port.autoSummaryAllowed ? this.port.autoSummaryAllowed() !== false : true;
+    } catch {
+      return true;
+    }
   }
 
   /** 给外部（例如小手机）看的只读镜像：给标签、分数与理由，不给正文全文之外的内部结构 */
@@ -571,12 +594,21 @@ export class MemoryEditorService {
       text: trimText(text, 6000),
     };
     this.lastInjection = record;
-    if (options.inject !== false) this.port.requestInject(text);
+    if (options.inject !== false) {
+      this.port.requestInject(text);
+      this.pendingInject = true;
+    } else {
+      this.pendingInject = false;
+    }
     return record;
   }
 
+  /**
+   * 清空注入槽。注意：**保留「上次召回」记录**（面板要显示它），只把「待消费」标记去掉。
+   * 一次性语义由 pendingInject 承担，见 onGenerationEnded。
+   */
   clearInject(): void {
-    this.lastInjection = null;
+    this.pendingInject = false;
     this.port.requestInject("");
   }
 
@@ -627,20 +659,31 @@ export class MemoryEditorService {
       this.state.seen.lastFloor = floor;
       this.state.seen.lastRunsAt = Date.now();
     }
-    if (this.lastInjection) {
+    if (this.pendingInject && this.lastInjection) {
       this.state.inject.last = this.lastInjection;
       this.state.stats.recalls += 1;
+      // 【1.4.2】注入块是一次性的：记完账就清空注入槽。
+      // setExtensionPrompt 是持久化的，不清就会跟着之后每一次生成（旧行为会一直挂着）。
+      this.clearInject();
     }
     this.save();
     if (this.running || this.port.busy()) return;
     if (this.state.mode !== "extra" || !this.state.cfg.auto.enabled) return;
+    // 【1.4.2】摘要归属不在剪辑台时让位：宿主（柏宝书）的摘要森林自己会摘。
+    // 两边同时自动摘 = 同一段剧情两次模型调用 + 两个互相矛盾的缺口数字。
+    if (!this.autoAllowed()) return;
     if (Date.now() - (this.state.seen.lastBlockAt || 0) < this.state.cfg.auto.minIntervalMs) return;
     const pending = nextPendingRange(this.state.tree, numbers, this.state.cfg.auto.every);
     if (!pending) return;
     this.state.seen.lastBlockAt = Date.now();
-    void this.generateBlock(pending).catch((error) => {
-      this.log(`自动摘要跳过：${trimText(error instanceof Error ? error.message : String(error), 120)}`, "warn");
-    });
+    void this.generateBlock(pending)
+      .then((draft) => {
+        // 【1.4.2】自动产的草稿进「待确认」后没人知道 → 明确提示一次（面板默认收起的）
+        this.port.toast(`剧情剪辑台：第 ${draft.from + 1}–${draft.to + 1} 楼摘要草稿已生成，待确认`, "info");
+      })
+      .catch((error) => {
+        this.log(`自动摘要跳过：${trimText(error instanceof Error ? error.message : String(error), 120)}`, "warn");
+      });
   }
 
   /** 面板上的「现在生成」按钮：优先补下一块，否则总结最近一段 */

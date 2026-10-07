@@ -1,3 +1,14 @@
+# 1.4.2 联动接线修复（与手机 2.9.5 配套）
+
+- **剪辑台召回接进生成流程**：`src/index.ts` 的生成拦截器在放行路径上调用 `runEditorRecall()`（写独立槽 `baibai_book_editor`）；剪辑台在 `onGenerationEnded` 里记完「上次召回」就清空注入槽。此前宿主一处都没调 → 召回从未自动生效，手动注入会一直挂着（`setExtensionPrompt` 是持久化的）。
+- **「汇入小手机记录」修好**：`host.ts` 传入 `notesProvider`（取 `externalState.notes` 中 `source === 'tsukiyo-phone'` 的记录），`mergePhoneNotes()` 这条链路打通。
+- **自动摘要归属二选一**：新增设置 `editorOwnsAutoSummary`（设置 → 摘要设置 →「自动摘要归属」）。柏宝书（默认）由摘要森林自动摘要；选「剧情剪辑台」后 `engine.ts` 的 `maybeSummarizePrevAi` 直接早退，改由剪辑台自动生成（进「待确认」草稿）。时间标签 / 旧楼隐藏 / 积压拦截仍跟随 `autoSummaryEnabled`，不受归属影响。宿主通过 `ports.autoSummaryAllowed()` 告知剪辑台，剪辑台在 `onGenerationEnded` 里让位。
+- **能力声明扩展**：`capability()` 增加 `enabled`（剪辑台总开关）与 `mode`；新增 `memoryEditor.open()/close()/toggle()`（宿主传 `panelControls`），`CreateOptions.notesProvider` / `panelControls` 类型补齐。
+- **面板按需重绘 + 角标**：`st-baibai-book:changed` 到达时面板收起则不重建 DOM、同轮事件合并（120ms）；新增 `features/memory-editor/badge.ts`，魔杖菜单「剧情剪辑台」显示待确认草稿数；自动生成草稿后 toast 一次提示。
+- **恋爱心迹注入可关**：`phoneBridge.injectHeart`（默认开）—— 关闭后 `phone_heart` 记录仍保留在「联动」页与摘要材料里，只是不塞进主模型，避免与「锚点日记」重复占上下文。
+- **清理**：删除无人引用的 `describeEditor()`；修正 `mountMemoryEditorPanel` 里恒为假的补挂条件（改为查 `.bme-root`）；更正 `host.ts` 里挂错位置的注释。
+- 测试：剪辑台模块用例 55 → **60**（能力开关 / 一次性注入 / 归属让位 / 草稿提示 / 旧宿主兼容）；vitest 302、timeRel 810、vector-depth 12、memory 53 全绿；`vue-tsc` 0 报错；`vite build` + `check:local` 通过。
+
 # 1.4.1 剪辑台显示修复 + 去重
 
 - **修复「剧情剪辑台在酒馆里显示不对」**：

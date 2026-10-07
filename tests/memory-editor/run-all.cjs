@@ -2,4 +2,5 @@
 const harness = require("./harness.cjs");
 require("./core.test.cjs");
 require("./service.test.cjs");
+require("./contract.test.cjs");
 void harness.run();

@@ -266,6 +266,25 @@ snapshot, history, injectedHistory, floor, context
 - `injectedHistory` 无需额外参数，使用正常记忆注入的滑动窗口过滤规则。
 - 其余状态资源可选 `floor` 和 `at`。
 
+## 剧情剪辑台命名空间（1.4.0 起，apiVersion 1）
+
+`window.STBaiBaiBook.memoryEditor`（未绑定剪辑台时为 `undefined`）——给小手机等外部脚本用的只读为主的接口：
+
+| 方法 | 说明 |
+| --- | --- |
+| `capability()` | `{ available, apiVersion, pluginVersion, enabled, mode }`。**`enabled` 是剪辑台总开关**（1.4.2 起）：为 `false` 时调用方应视为「引擎没在管」，自己接管楼层记忆 |
+| `mirror()` | 只读镜像：覆盖率、生效摘要（正文截断）、账本条目、计数、上次召回（只给标签/分数/理由，不给正文） |
+| `info()` | 面板同款统计（楼层、摘要、缺口、待确认、状态、日志尾） |
+| `recall(opts?)` | 手动召回一次；`phoneOnly: true` 只召回外部资料（手机记忆）。写独立注入槽，生成时会由宿主自动调用 |
+| `mergeExternal(rows)` / `mergePhoneNotes(notes)` | 把外部记录汇进剧情状态账本（标注 `source`/`phone`，与正文摘要分开） |
+| `exportArchive()` / `diagnostics()` | 记忆档案导出 / 脱敏诊断（不含正文原文） |
+| `open()` / `close()` / `toggle()` | 打开、收起、开合剪辑台抽屉（**1.4.2 新增**） |
+
+事件：`st-baibai-book:memory-editor`（`detail` 就是 `mirror()` 的内容），状态变化时广播（500ms 节流）。
+小手机 v2.9.5 起订阅它来即时刷新镜像。
+
+设置侧（供宿主/其它扩展判断，不在 API 里）：`extension_settings[st-baibai-book].editorOwnsAutoSummary` —— 自动摘要归属（柏宝书摘要森林 / 剧情剪辑台），两侧不会同时自动摘要。
+
 ## 变更通知
 
 通过 API 订阅：

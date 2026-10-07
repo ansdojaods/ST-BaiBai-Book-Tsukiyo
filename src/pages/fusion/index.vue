@@ -515,6 +515,7 @@ const phoneDetected = computed(() => {
       <Collapsible title="联动设置" :open="false">
         <label class="bbs-fu-switch"><span>把外部记录注入主模型</span><input v-model="p.injectExternal" type="checkbox" class="bbs-fu-check" /></label>
         <label class="bbs-fu-switch"><span>外部记录作为摘要/总结材料</span><input v-model="p.includeInSummary" type="checkbox" class="bbs-fu-check" /></label>
+        <label class="bbs-fu-switch"><span>「恋爱心迹」也参与注入（关闭后仍保留记录与摘要材料，只是不塞进主模型）</span><input v-model="p.injectHeart" type="checkbox" class="bbs-fu-check" /></label>
         <div class="bbs-fu-grid2">
           <label class="bbs-fu-field"><span class="bbs-fu-label">外部记录注入预算(字符)</span><input v-model.number="p.externalMaxChars" class="bbs-input" type="number" min="200" max="20000" step="100" /></label>
           <label class="bbs-fu-field"><span class="bbs-fu-label">简报历史预算(字符)</span><input v-model.number="p.briefHistoryChars" class="bbs-input" type="number" min="200" max="20000" step="100" /></label>

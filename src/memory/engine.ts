@@ -857,6 +857,13 @@ export async function maybeSummarizePrevAi(
   const session = captureSession();
   if (!engineActiveHere()) return;
   if (!apiSettings.autoSummaryEnabled) return;
+  // 【1.4.2】摘要归属在「剧情剪辑台」时引擎不再自动增量补摘：
+  // 两边同时自动摘 = 同一段剧情两次模型调用 + 两个互相矛盾的缺口数字。
+  // 注意：时间标签、旧楼隐藏、积压拦截仍跟随 autoSummaryEnabled，不受归属影响。
+  if (apiSettings.editorOwnsAutoSummary === true) {
+    console.log('[柏宝书] 自动摘要归属在剧情剪辑台，跳过引擎自动补摘');
+    return;
+  }
   if (busy) return;
   if (!ctx) return;
   if (chat.length === 0) return;
@@ -2119,6 +2126,14 @@ export function bindEngine(): void {
     () => apiSettings.autoSummaryEnabled,
     () => {
       syncTimeTagRegex();
+      refreshInjection();
+    },
+  );
+
+  // 【1.4.2】摘要归属切换：引擎侧自动补摘随开随停（读的是实时设置，这里只刷新注入与时间标签状态）。
+  watch(
+    () => apiSettings.editorOwnsAutoSummary,
+    () => {
       refreshInjection();
     },
   );
