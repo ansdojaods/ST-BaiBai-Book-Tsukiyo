@@ -16,7 +16,7 @@
 import type { STMessage } from '@/st/context';
 import { getContext } from '@/st/context';
 import { apiSettings, resolveVectorModel } from '@/api/settings';
-import { deriveMemory, getLeaf, leafValid } from '../apply';
+import { deriveMemory, leafValid } from '../apply';
 import { resolveKeepStart } from '../engine';
 import { renderHistoryNodes, selectHistoryNodesBefore } from '../inject';
 import { fmtItems, fmtNpcs, fmtPlans, fmtProtagonist, JAILBREAK_PROMPT, QUERY_REWRITE_SYSTEM, QUERY_REWRITE_TAIL } from '../prompts';

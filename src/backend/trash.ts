@@ -3,7 +3,7 @@
  *
  * 柏宝书原版删除摘要/锚点是即时且不可逆的。这里在删除前把对象丢进
  * chatMetadata['baibai_book_trash'],用户可在「联动·备份」页一键恢复;
- * 条数超过设置上限时淘汰最旧的。旧版远程后端可用时另有一份镜像(见 sync.ts)。
+ * 条数超过设置上限时淘汰最旧的。
  */
 import { reactive } from 'vue';
 import { getContext } from '@/st/context';
@@ -25,22 +25,10 @@ export interface TrashEntry {
 export const trashState = reactive<{ items: TrashEntry[]; rev: number }>({ items: [], rev: 0 });
 
 let seq = 0;
-const listeners = new Set<() => void>();
 
-/** 变更订阅(sync.ts 用来镜像到后端) */
-export function onTrashChanged(cb: () => void): () => void {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
-}
+/** 每次变更递增 rev,供界面感知回收站变化 */
 function notify(): void {
   trashState.rev += 1;
-  for (const cb of listeners) {
-    try {
-      cb();
-    } catch (e) {
-      console.warn('[柏宝书] 回收站订阅者异常', e);
-    }
-  }
 }
 
 export function loadTrash(): void {
@@ -100,16 +88,5 @@ export function trashRemove(id: string): TrashEntry | null {
 export function trashClear(): void {
   if (!trashState.items.length) return;
   trashState.items = [];
-  save();
-}
-
-/** 导出用:纯数据 */
-export function trashSnapshot(): TrashEntry[] {
-  return JSON.parse(JSON.stringify(trashState.items));
-}
-
-/** 整体替换(从后端镜像恢复时) */
-export function replaceTrash(items: TrashEntry[]): void {
-  trashState.items = JSON.parse(JSON.stringify(items));
   save();
 }

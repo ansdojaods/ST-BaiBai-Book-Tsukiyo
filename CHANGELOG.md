@@ -1,3 +1,18 @@
+# 1.4.3 优化与修复（全量检查后的一轮整理）
+
+- **修复：渠道编辑弹窗里的测试会提前改动已保存渠道**：编辑弹窗中「用上面的用语测试」「更多测试选项 → 开始测试」会把草稿的 `url`、测试用语、测试结果直接写进已保存渠道，点「取消」也回不去。现在测试只改草稿，结果随「完成」一起保存，「取消」全部作废；列表里的测试行为不变。`settings/index.vue` 的 `doTest()` 与 `ChannelTestModals.vue` 的 `runSingleTest()` 同步修正。新增回归测试 `src/components/ChannelTestModals.draft.test.ts`（旧代码上失败，修复后通过）。
+- **工程：新增 GitHub Actions**（`.github/workflows/verify.yml`）：push / PR 时在 Node 22 上执行 `npm ci && npm run verify`，并检查提交的 `dist/`、`manifest.json` 与源码重建结果一致（酒馆直接加载 `dist/index.js`，产物漂移会直接影响用户）。
+- **依赖：只保留 `package-lock.json`**：删除与之并存的 `pnpm-lock.yaml`（文档统一用 npm），并写入 `.gitignore` 防止再次提交。
+- **清理死代码**（每一项都经过全仓库引用检查）：
+  - 远程镜像时代的残留：`onTrashChanged` / `trashSnapshot` / `replaceTrash`（`sync.ts` 已移除），回收站的 `listeners` 订阅同时去掉，`rev` 计数保留。
+  - 无引用的包装与工具：`vecDelete`（删除由 `vecReconcile` 完成）、`embedToBase64`、`buildInjectionText`、`readVarsTagText`、`deepClone`、剪辑台的 `defaultConfig` / `defaultState` 别名。
+  - 过时文档常量：`QUERY_REWRITE_MACROS`（列出的占位符在 Query 重写中并不替换）。
+  - 测试钩子：`__resetIdSeq`（无测试引用）。
+  - 未用导入与局部变量 6 处（`apply.ts`、`inject.ts`、`rewrite.ts`、`fusion/index.vue`、`memory-editor/service.ts`，以及 `engine.ts` 的 `setFloorOmit` 里未使用的会话票据）。
+- **注释修正**：`App.vue` 的 `modalHost` 绑定加注释（该导入看似未使用，实际由模板 `ref` 绑定，勿删）；`trash.ts` 头部注释中已失效的 `sync.ts` 引用。
+- 版本 1.4.3；`dist/` 与 `manifest.json` 已重建，源码与产物一致。
+- 验证：见 `docs/优化说明_1.4.3.md`。
+
 # 1.4.2 联动接线修复（与手机 2.9.5 配套）
 
 - **剪辑台召回接进生成流程**：`src/index.ts` 的生成拦截器在放行路径上调用 `runEditorRecall()`（写独立槽 `baibai_book_editor`）；剪辑台在 `onGenerationEnded` 里记完「上次召回」就清空注入槽。此前宿主一处都没调 → 召回从未自动生效，手动注入会一直挂着（`setExtensionPrompt` 是持久化的）。

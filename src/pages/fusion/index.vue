@@ -12,7 +12,7 @@ import { toast } from '@/st/toast';
 import { getContext } from '@/st/context';
 import { PLUGIN_VERSION } from '@/version';
 import { anchorState, currentAnchor, setAnchorExcluded, updateAnchorText, addAnchor, type AnchorEntry } from '@/anchor/store';
-import { deleteAnchorToTrash, generateAnchorSilently, insertTriggerIntoInput, extractAnchorBlock, effectiveInstruction } from '@/anchor/engine';
+import { deleteAnchorToTrash, generateAnchorSilently, insertTriggerIntoInput, extractAnchorBlock } from '@/anchor/engine';
 import { DEFAULT_ANCHOR_INSTRUCTION } from '@/anchor/prompts';
 import { refreshInjection } from '@/memory/inject';
 import { restoreState, createRestorePoint, restoreFromPoint, deleteRestorePoint, buildSnapshot, parseSnapshot, applySnapshot, restoreTrashEntry } from '@/backend/restore';

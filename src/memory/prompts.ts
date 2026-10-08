@@ -1410,10 +1410,6 @@ export function buildSummaryThinking(user: string): { checklist: string; prefill
 /* ============ 向量召回:查询重写(Query Rewrite) ============ */
 
 /** 查询重写可用的宏(供设置页展示) */
-export const QUERY_REWRITE_MACROS: PromptMacro[] = [
-  { token: '{{history_block}}', desc: '历史剧情摘要(已注入为前置上下文)' },
-  { token: '{{state_snapshot}}', desc: '状态快照(滚出窗口的物品/计划)' },
-];
 
 /**
  * 查询重写系统提示词(复刻 Horae,用户已优化版)。

@@ -816,7 +816,6 @@ export async function setFloorOmit(floor: number, on: boolean): Promise<void> {
   const ctx = getContext();
   if (!ctx) return;
   const chat = ctx.chat ?? [];
-  const session = captureSession();
   const m = chat[floor];
   if (!m) return;
   const already = !!m.extra?.bbs_omit;

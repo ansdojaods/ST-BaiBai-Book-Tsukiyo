@@ -108,9 +108,6 @@ export function vecSearch(
   });
 }
 
-export function vecDelete(database: string, scope: string, leafIds: string[]): Promise<{ deleted: number }> {
-  return request('vec/delete', { database, scope, leafIds });
-}
 
 export function vecClearScope(database: string, scope: string): Promise<{ deleted: number }> {
   return request('vec/clear-scope', { database, scope });

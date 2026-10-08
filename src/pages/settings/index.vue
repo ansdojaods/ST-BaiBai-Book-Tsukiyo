@@ -321,13 +321,8 @@ async function doTest(ch: ApiChannel) {
     testing.value[ch.id] = r.ok
       ? `✓ 测试通过 (${(r.ms / 1000).toFixed(1)}s)`
       : `✗ 测试失败 (${(r.ms / 1000).toFixed(1)}s)`;
-    // 若在编辑弹窗草稿上直接测试,同步写回已保存的同 id 渠道
-    const saved = apiSettings.channels.find(x => x.id === ch.id);
-    if (saved && saved !== ch) {
-      saved.testPrompt = ch.testPrompt;
-      saved.lastTest = ch.lastTest ? { ...ch.lastTest } : undefined;
-      if (ch.url) saved.url = ch.url;
-    }
+    // 不再写回已保存渠道:编辑弹窗里测试的是草稿,结果留在草稿 lastTest 上,
+    // 点「完成」时随草稿一起保存,点「取消」则与其他改动一并作废。
   } finally {
     testingRunning.value[ch.id] = false;
   }

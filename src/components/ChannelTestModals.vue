@@ -69,12 +69,9 @@ async function runSingleTest() {
   const ch = singleChannel.value;
   if (!ch || singleRunning.value) return;
   const phrase = singlePhrase.value.trim() || '请回复 OK。';
+  // 注意:ch 可能是「编辑渠道」的草稿副本。测试只改草稿,不写回已保存渠道;
+  // 草稿取消即作废,与编辑弹窗的其他改动保持一致。
   ch.testPrompt = singlePhrase.value.trim();
-  // 若当前是在「编辑渠道」草稿上发起测试,同步回已保存的同名 id 渠道
-  const saved = apiSettings.channels.find(x => x.id === ch.id);
-  if (saved && saved !== ch) {
-    saved.testPrompt = ch.testPrompt;
-  }
   if (singleWithJailbreak.value !== !!apiSettings.ui.testWithJailbreak) {
     apiSettings.ui.testWithJailbreak = singleWithJailbreak.value;
   }
@@ -85,10 +82,6 @@ async function runSingleTest() {
       phrase,
       withJailbreak: singleWithJailbreak.value,
     });
-    if (saved && saved !== ch) {
-      saved.lastTest = ch.lastTest ? { ...ch.lastTest } : undefined;
-      if (ch.url) saved.url = ch.url;
-    }
     singleResult.value = {
       at: ch.lastTest?.at ?? Date.now(),
       ok: res.ok,

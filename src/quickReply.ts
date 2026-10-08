@@ -35,7 +35,7 @@ function ensureButtonHolder(sendForm: HTMLElement): HTMLElement {
     sendForm.prepend(bar);
   }
   // 复用条内已有的 .qr--buttons,没有就建一个(原生未组合模式时可能没有)
-  let holder = bar.querySelector('.qr--buttons') as HTMLElement | null;
+  let holder = bar.querySelector<HTMLElement>('.qr--buttons');
   if (!holder) {
     holder = document.createElement('div');
     holder.className = 'qr--buttons';

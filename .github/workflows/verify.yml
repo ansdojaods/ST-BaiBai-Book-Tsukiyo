@@ -1,0 +1,36 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 与 安装说明.md 保持一致:Node.js 22.12+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖(以 package-lock.json 为准)
+        run: npm ci
+
+      # 类型检查 → 测试 → 剪辑台模块测试 → 构建 → 无白鸟产物检查
+      - name: npm run verify
+        run: npm run verify
+
+      # 提交的 dist/ 与 manifest.json 必须与源码重建结果一致(酒馆直接加载 dist/index.js)
+      - name: 检查 dist/ 与 manifest.json 是否与源码同步
+        run: |
+          git diff --exit-code -- dist manifest.json || {
+            echo "::error::dist/ 或 manifest.json 与源码不一致,请在本地执行 npm run build 后提交。"
+            exit 1
+          }

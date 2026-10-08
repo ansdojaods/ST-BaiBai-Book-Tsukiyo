@@ -15,7 +15,6 @@ export const trimText = (value: unknown, max = 2000): string =>
 export const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-export const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 let seq = 0;
 export const mkId = (prefix: string): string => {

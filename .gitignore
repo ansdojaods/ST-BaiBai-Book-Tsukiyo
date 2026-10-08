@@ -12,3 +12,6 @@ AGENTS.md
 .pi/
 data/
 .build/
+
+# 本项目统一使用 npm（package-lock.json）；勿提交 pnpm 锁文件，以免依赖版本分叉
+pnpm-lock.yaml

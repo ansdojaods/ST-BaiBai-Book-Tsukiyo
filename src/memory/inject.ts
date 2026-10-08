@@ -23,7 +23,7 @@ import { buildExternalInjectionText } from '@/bridge/external';
 import { compactTimeLabel, formatRange, latestStoryTime, splitTimeLabel, timeTagPrompt } from './timeTag';
 import { relativeTimeLabel, weekdayLabel, ageDisplay, calculateRelativeDays } from './timeRel';
 import { selectViewNodes, selectLifeDetailsForInjection, type ViewNode } from './select';
-import type { LeafExtra, MemItem, MemLifeDetail, MemNpc, MemProtagonist, MemScene, MemSummary, SceneFocus } from './types';
+import type { LeafExtra, MemItem, MemNpc, MemProtagonist, MemScene, MemSummary } from './types';
 
 // 摘要页列表复用同一套选择逻辑,经此 re-export(纯算法在 select.ts,零依赖、可单测)
 export { selectViewNodes, type ViewNode };
@@ -703,9 +703,6 @@ export function buildStateInjectionText(): string {
  * 组合注入文本:已启用的历史摘要 + 当前结构化状态(时间/地点/物品/未了结计划)。
  * 保留给调试/兼容调用;实际注入由 refreshInjection 拆成两个 ST 槽位。
  */
-export function buildInjectionText(): string {
-  return [buildHistoryInjectionText(), buildStateInjectionText()].filter(Boolean).join('\n\n').trim();
-}
 
 /** 按 ST 自身 tokenizer 不可用时的兜底口径估算文本 token 数。 */
 function estimateTextTokens(blocks: string[]): number {

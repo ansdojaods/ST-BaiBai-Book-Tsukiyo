@@ -8,7 +8,7 @@ import { LEDGER_LABELS, applyRows, editEntry, removeEntry, rowsFromExternal } fr
 import { planBackfill, planLong, planShelve, planStage, levelLabel } from "./core/plan";
 import { collectCandidates, rank, renderBlock } from "./core/recall";
 import { DEFAULT_PROMPTS, JSON_TAIL, PROMPT_LABELS, promptOf } from "./core/prompts";
-import { EDITOR_VERSION, coerceState, diagnostics, exportConfig, freshConfig, freshState, importConfig } from "./core/state";
+import { EDITOR_VERSION, coerceState, diagnostics, exportConfig, importConfig } from "./core/state";
 import { dayStamp, mkId, parseJsonLoose, pickKeywords, rangeLabel, trimText } from "./core/util";
 import type { CoverageReport, Draft, LedgerDeltaRow, LedgerKind, MemoryEditorMirror, MemoryEditorState, PromptKind, RecallRecord, SummaryLevel, SummaryNode } from "./types";
 import type { FloorRef, GenerateRequest, HostPort, MemoryEditorCapability } from "./ports";
@@ -787,6 +787,4 @@ export class MemoryEditorService {
 }
 
 /** 让面板拿到默认配置（避免面板里再 import 一次 state） */
-export const defaultConfig = freshConfig;
-export const defaultState = freshState;
 export { PROMPT_LABELS, DEFAULT_PROMPTS, levelLabel };

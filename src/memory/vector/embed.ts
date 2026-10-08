@@ -206,11 +206,6 @@ export async function embedTexts(texts: string[], signal?: AbortSignal): Promise
 }
 
 /** 向量化单条文本 → base64,索引/检索时用。 */
-export async function embedToBase64(text: string, signal?: AbortSignal): Promise<string> {
-  const [v] = await embedTexts([text], signal);
-  if (!v) throw new EmbedError('embedding 返回为空');
-  return encodeFloat32Base64(v);
-}
 
 export interface RerankResult {
   index: number;

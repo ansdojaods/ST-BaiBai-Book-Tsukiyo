@@ -87,6 +87,7 @@ const windowStyle = computed(() => {
   <div class="bbs-root" :data-theme="ui.theme">
     <!-- 弹窗 Teleport 宿主:.bbs-root 直接子级,在 .bbs-body 滚动容器之外。
          各页弹窗 Teleport 到此,避开 iOS「可滚动祖先内 fixed 后代定位错乱」(详见 state/ui.ts)。 -->
+    <!-- 注意:此 ref 依赖下方 import 的 modalHost(state/ui)绑定,勿删该 import -->
     <div ref="modalHost"></div>
     <!-- 悬浮球:留在 shadow 内才能用 --bbs-* 主题变量;自身 position:fixed 贴边,不受 host 影响 -->
     <FloatingOrb v-if="ui.showOrb" />

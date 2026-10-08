@@ -455,9 +455,6 @@ export function writeVarLogTag(mes: string, inline: string): string {
 }
 
 /** 读取正文里的 <bbs_vars> 块内文本(去首尾空白);无块返回 null(供反解析判断用户是否删了整块)。 */
-export function readVarsTagText(mes: string): string | null {
-  return readManagedTagText(mes, VARS_TAG);
-}
 
 /* ============ 自动注册「仅显示层隐藏」正则到 ST ============ */
 
